@@ -69,10 +69,7 @@ impl PricingCatalog {
 
     pub fn lookup_for_event(&self, event: &UsageEvent) -> Option<&ModelPricing> {
         if let Some(key) = event.pricing_model_id() {
-            if let Some(value) = lookup_exact_model(&self.models, &key) {
-                return Some(value);
-            }
-            return None;
+            return lookup_exact_model(&self.models, &key);
         }
 
         if event.provider_id.is_none() {
@@ -83,10 +80,10 @@ impl PricingCatalog {
     }
 
     pub fn cost_for_event(&self, event: &UsageEvent) -> Decimal {
-        if let Some(cost) = event.stored_cost_usd {
-            if cost > Decimal::ZERO {
-                return cost;
-            }
+        if let Some(cost) = event.stored_cost_usd
+            && cost > Decimal::ZERO
+        {
+            return cost;
         }
 
         let Some(pricing) = self.lookup_for_event(event) else {
@@ -362,14 +359,13 @@ pub fn normalize_model_key(model_id: &str) -> String {
     model = regexless_replace_version(&model, "claude-haiku-");
     model = regexless_replace_version(&model, "gpt-");
 
-    if let Some(stripped) = model.strip_prefix("kimi-k-") {
-        if stripped
+    if let Some(stripped) = model.strip_prefix("kimi-k-")
+        && stripped
             .chars()
             .next()
             .is_some_and(|ch| ch.is_ascii_digit())
-        {
-            model = format!("kimi-k{stripped}");
-        }
+    {
+        model = format!("kimi-k{stripped}");
     }
 
     model

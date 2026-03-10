@@ -33,11 +33,11 @@ pub fn aggregate_daily(
         });
         entry.tokens.add_assign(&event.tokens);
         entry.interactions += 1;
-        if let Some(cost) = event.stored_cost_usd {
-            if cost > Decimal::ZERO {
-                entry.cost.add_known(cost);
-                continue;
-            }
+        if let Some(cost) = event.stored_cost_usd
+            && cost > Decimal::ZERO
+        {
+            entry.cost.add_known(cost);
+            continue;
         }
 
         if pricing.has_pricing_for_event(event) {

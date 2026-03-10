@@ -9,16 +9,16 @@ use std::collections::BTreeSet;
 use chrono::NaiveDate;
 
 use crate::analytics::daily::aggregate_daily;
-use crate::analytics::heatmap_data::{build_heatmap_data, HeatmapData};
+use crate::analytics::heatmap_data::{HeatmapData, build_heatmap_data};
 use crate::analytics::model_stats::{
-    build_model_chart, build_provider_chart, ModelChartData, ModelUsageRow, ProviderUsageRow,
+    ModelChartData, ModelUsageRow, ProviderUsageRow, build_model_chart, build_provider_chart,
 };
 use crate::analytics::monthly::aggregate_monthly;
 use crate::analytics::weekly::aggregate_weekly;
 use crate::cache::models_cache::PricingCatalog;
 use crate::db::models::{AppData, UsageEvent};
 use crate::utils::pricing::PriceSummary;
-use crate::utils::time::{current_local_date, TimeRange};
+use crate::utils::time::{TimeRange, current_local_date};
 
 #[derive(Clone, Debug)]
 pub struct OverviewStats {
@@ -76,11 +76,11 @@ pub fn build_snapshot(
         .sum::<u64>();
     let mut total_cost = PriceSummary::default();
     for event in &filtered_events {
-        if let Some(cost) = event.stored_cost_usd {
-            if cost > rust_decimal::Decimal::ZERO {
-                total_cost.add_known(cost);
-                continue;
-            }
+        if let Some(cost) = event.stored_cost_usd
+            && cost > rust_decimal::Decimal::ZERO
+        {
+            total_cost.add_known(cost);
+            continue;
         }
 
         if pricing.lookup_for_event(event).is_some() {

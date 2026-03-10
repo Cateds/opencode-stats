@@ -118,12 +118,11 @@ impl App {
             }
 
             terminal.draw(|frame| self.render(frame))?;
-            if event::poll(Duration::from_millis(200))? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press {
-                        self.handle_key(key);
-                    }
-                }
+            if event::poll(Duration::from_millis(200))?
+                && let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                self.handle_key(key);
             }
         }
         Ok(())

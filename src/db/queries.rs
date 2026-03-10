@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Local};
 use rusqlite::OptionalExtension;
 
@@ -199,10 +199,10 @@ fn load_from_json_values(values: Vec<serde_json::Value>, source_path: &Path) -> 
             ..session_row
         };
 
-        if let Some(event) = parse_json_record(record, &session_row, DataSourceKind::Json) {
-            if event.tokens.total() > 0 {
-                all_events.push(event);
-            }
+        if let Some(event) = parse_json_record(record, &session_row, DataSourceKind::Json)
+            && event.tokens.total() > 0
+        {
+            all_events.push(event);
         }
     }
 

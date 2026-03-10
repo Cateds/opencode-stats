@@ -67,11 +67,11 @@ pub fn build_model_chart(
             entry.active_days.insert(date);
             *entry.daily_tokens.entry(date).or_default() += event.tokens.total();
         }
-        if event.is_rate_eligible() {
-            if let Some(duration_ms) = event.duration_ms() {
-                let rate = event.tokens.output as f64 / (duration_ms as f64 / 1_000.0);
-                entry.output_rates.push(rate);
-            }
+        if event.is_rate_eligible()
+            && let Some(duration_ms) = event.duration_ms()
+        {
+            let rate = event.tokens.output as f64 / (duration_ms as f64 / 1_000.0);
+            entry.output_rates.push(rate);
         }
     }
 
@@ -125,11 +125,11 @@ pub fn build_provider_chart(
             entry.active_days.insert(date);
             *entry.daily_tokens.entry(date).or_default() += event.tokens.total();
         }
-        if event.is_rate_eligible() {
-            if let Some(duration_ms) = event.duration_ms() {
-                let rate = event.tokens.output as f64 / (duration_ms as f64 / 1_000.0);
-                entry.output_rates.push(rate);
-            }
+        if event.is_rate_eligible()
+            && let Some(duration_ms) = event.duration_ms()
+        {
+            let rate = event.tokens.output as f64 / (duration_ms as f64 / 1_000.0);
+            entry.output_rates.push(rate);
         }
     }
 
@@ -169,11 +169,11 @@ pub fn build_provider_chart(
 pub fn chart_with_focus(chart: &ModelChartData, focused_model_id: Option<&str>) -> ModelChartData {
     let mut series = chart.series.clone();
 
-    if let Some(model_id) = focused_model_id {
-        if let Some(index) = series.iter().position(|series| series.model_id == model_id) {
-            let focused = series.remove(index);
-            series.push(focused);
-        }
+    if let Some(model_id) = focused_model_id
+        && let Some(index) = series.iter().position(|series| series.model_id == model_id)
+    {
+        let focused = series.remove(index);
+        series.push(focused);
     }
 
     ModelChartData {
@@ -337,11 +337,11 @@ struct UsageAccumulator {
 }
 
 fn update_cost(summary: &mut PriceSummary, pricing: &PricingCatalog, event: &UsageEvent) {
-    if let Some(cost) = event.stored_cost_usd {
-        if cost > rust_decimal::Decimal::ZERO {
-            summary.add_known(cost);
-            return;
-        }
+    if let Some(cost) = event.stored_cost_usd
+        && cost > rust_decimal::Decimal::ZERO
+    {
+        summary.add_known(cost);
+        return;
     }
 
     if pricing.has_pricing_for_event(event) {
