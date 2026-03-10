@@ -42,3 +42,4 @@ struct CliArgs {
     #[arg(long = "theme", default_value = "dark")]
     theme: ThemeMode,
 }
+

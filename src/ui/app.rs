@@ -1,20 +1,27 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{DefaultTerminal, Frame, TerminalOptions, Viewport};
 use tokio::sync::mpsc;
 
-use crate::analytics::{AnalyticsSnapshot, build_snapshot};
-use crate::cache::models_cache::{PricingCatalog, refresh_remote_models};
+use crate::analytics::{build_snapshot, AnalyticsSnapshot};
+use crate::cache::models_cache::{refresh_remote_models, PricingCatalog};
 use crate::db::models::AppData;
 use crate::ui::models::render_models;
 use crate::ui::overview::render_overview;
 use crate::ui::theme::{Theme, ThemeMode};
-use crate::ui::widgets::common::{CONTENT_WIDTH, left_aligned_content, segment_span};
+use crate::ui::widgets::common::{left_aligned_content, segment_span, CONTENT_WIDTH};
 use crate::utils::time::TimeRange;
 
 const VIEWPORT_HEIGHT: u16 = 23;
+const STATUS_TTL: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Debug)]
+struct StatusMessage {
+    text: String,
+    expires_at: Instant,
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Page {
@@ -44,7 +51,7 @@ pub struct App {
     pub range: TimeRange,
     pub theme_mode: ThemeMode,
     pub should_quit: bool,
-    pub status_message: Option<String>,
+    status_message: Option<StatusMessage>,
     pub focused_model_index: usize,
     pricing_updates: mpsc::UnboundedReceiver<PricingCatalog>,
 }
@@ -92,10 +99,11 @@ impl App {
 
     fn run_loop(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         while !self.should_quit {
+            self.clear_expired_status();
             while let Ok(pricing) = self.pricing_updates.try_recv() {
                 self.pricing = pricing;
                 self.recompute();
-                self.status_message = Some("Pricing cache refreshed from models.dev".to_string());
+                self.set_status("Pricing cache refreshed from models.dev");
             }
 
             terminal.draw(|frame| self.render(frame))?;
@@ -175,8 +183,9 @@ impl App {
     fn render_footer(&self, frame: &mut Frame<'_>, area: ratatui::layout::Rect, theme: &Theme) {
         let status = self
             .status_message
-            .as_deref()
-            .unwrap_or("tab/←/→ pages | r cycle | 1/2/3 pick | <ctrl-s> copy | q exit");
+            .as_ref()
+            .map(|status| status.text.as_str())
+            .unwrap_or("tab/←/→/h/l pages | r cycle | 1/2/3 pick | <ctrl-s> copy | q exit");
         frame.render_widget(
             ratatui::widgets::Paragraph::new(status).style(theme.muted_style()),
             left_aligned_content(area),
@@ -186,8 +195,8 @@ impl App {
     fn handle_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
-            KeyCode::Tab | KeyCode::Right => self.page = self.page.next(),
-            KeyCode::Left => self.page = self.page.previous(),
+            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => self.page = self.page.next(),
+            KeyCode::Left | KeyCode::Char('h') => self.page = self.page.previous(),
             KeyCode::Down | KeyCode::Char('j') => self.advance_focused_model(1),
             KeyCode::Up | KeyCode::Char('k') => self.advance_focused_model(-1),
             KeyCode::Char('r') => {
@@ -222,6 +231,23 @@ impl App {
         self.focused_model_index = next;
     }
 
+    fn set_status(&mut self, text: impl Into<String>) {
+        self.status_message = Some(StatusMessage {
+            text: text.into(),
+            expires_at: Instant::now() + STATUS_TTL,
+        });
+    }
+
+    fn clear_expired_status(&mut self) {
+        if self
+            .status_message
+            .as_ref()
+            .is_some_and(|status| Instant::now() >= status.expires_at)
+        {
+            self.status_message = None;
+        }
+    }
+
     fn copy_summary(&mut self) {
         let summary = match self.page {
             Page::Overview => format!(
@@ -248,10 +274,8 @@ impl App {
         };
 
         match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(summary)) {
-            Ok(()) => {
-                self.status_message = Some("Copied current page summary to clipboard".to_string())
-            }
-            Err(err) => self.status_message = Some(format!("Clipboard unavailable: {err}")),
+            Ok(()) => self.set_status("Copied current page summary to clipboard"),
+            Err(err) => self.set_status(format!("Clipboard unavailable: {err}")),
         }
     }
 }

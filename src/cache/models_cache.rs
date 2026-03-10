@@ -9,19 +9,19 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::cache::http_client;
+use crate::cache::opencode_config;
 use crate::db::models::{TokenUsage, UsageEvent};
 
-const BUNDLED_MODELS_JSON: &str = include_str!("../../ref/ocmonitor-share/ocmonitor/models.json");
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 const CACHE_TTL_SECS: u64 = 60 * 60;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ModelPricing {
     pub input: Decimal,
     pub output: Decimal,
-    #[serde(rename = "cacheWrite", default)]
+    #[serde(rename = "cacheWrite", alias = "cache_write", default)]
     pub cache_write: Decimal,
-    #[serde(rename = "cacheRead", default)]
+    #[serde(rename = "cacheRead", alias = "cache_read", default)]
     pub cache_read: Decimal,
     #[serde(rename = "contextWindow", default)]
     pub context_window: u64,
@@ -50,37 +50,31 @@ pub struct PricingCatalog {
 
 impl PricingCatalog {
     pub fn load() -> Result<Self> {
-        let bundled = load_bundled_models()?;
         let cache_path = default_cache_path()?;
         let cached = load_cached_models(&cache_path).unwrap_or_default();
+        let config = opencode_config::load_pricing_overrides()?;
         let refresh_needed = cache_is_stale(&cache_path).unwrap_or(true);
 
-        let mut merged = bundled.clone();
-        merge_fill_only(&mut merged, cached);
-
         Ok(Self {
-            models: merged,
+            models: merge_with_priority(cached, config),
             cache_path,
             refresh_needed,
         })
     }
 
     pub fn lookup(&self, model_id: &str) -> Option<&ModelPricing> {
-        let lowercase = model_id.to_lowercase();
-        if let Some(value) = self.models.get(&lowercase) {
-            return Some(value);
-        }
+        lookup_model(&self.models, model_id)
+    }
 
-        let normalized = normalize_model_key(model_id);
-        if let Some(value) = self.models.get(&normalized) {
-            return Some(value);
-        }
-
-        if let Some((_, bare)) = lowercase.split_once('/') {
-            let normalized_bare = normalize_model_key(bare);
-            if let Some(value) = self.models.get(&normalized_bare) {
+    pub fn lookup_for_event(&self, event: &UsageEvent) -> Option<&ModelPricing> {
+        if let Some(key) = event.pricing_model_id() {
+            if let Some(value) = lookup_model(&self.models, &key) {
                 return Some(value);
             }
+        }
+
+        if event.provider_id.is_none() {
+            return self.lookup(&event.model_id);
         }
 
         None
@@ -93,12 +87,20 @@ impl PricingCatalog {
             }
         }
 
-        let Some(pricing) = self.lookup(&event.model_id) else {
+        let Some(pricing) = self.lookup_for_event(event) else {
             return Decimal::ZERO;
         };
         price_tokens(&event.tokens, pricing)
     }
 
+    fn from_sources(cache_path: PathBuf, remote: BTreeMap<String, ModelPricing>) -> Result<Self> {
+        let config = opencode_config::load_pricing_overrides()?;
+        Ok(Self {
+            models: merge_with_priority(remote, config),
+            cache_path,
+            refresh_needed: false,
+        })
+    }
 }
 
 pub fn price_tokens(tokens: &TokenUsage, pricing: &ModelPricing) -> Decimal {
@@ -117,7 +119,10 @@ pub fn default_cache_path() -> Result<PathBuf> {
     Ok(config_dir.join("oc-stats").join("models.json"))
 }
 
-pub async fn refresh_remote_models(cache_path: PathBuf, sender: mpsc::UnboundedSender<PricingCatalog>) {
+pub async fn refresh_remote_models(
+    cache_path: PathBuf,
+    sender: mpsc::UnboundedSender<PricingCatalog>,
+) {
     let fetch_result = fetch_remote_catalog(&cache_path).await;
     if let Ok(catalog) = fetch_result {
         let _ = sender.send(catalog);
@@ -126,17 +131,9 @@ pub async fn refresh_remote_models(cache_path: PathBuf, sender: mpsc::UnboundedS
 
 async fn fetch_remote_catalog(cache_path: &Path) -> Result<PricingCatalog> {
     let payload = http_client::fetch_json(MODELS_DEV_URL).await?;
-    let remote = map_models_dev_to_local(&payload);
+    let remote = map_models_root_to_local("", &payload);
     persist_cached_models(cache_path, &remote)?;
-
-    let mut bundled = load_bundled_models()?;
-    merge_fill_only(&mut bundled, remote);
-
-    Ok(PricingCatalog {
-        models: bundled,
-        cache_path: cache_path.to_path_buf(),
-        refresh_needed: false,
-    })
+    PricingCatalog::from_sources(cache_path.to_path_buf(), remote)
 }
 
 fn persist_cached_models(path: &Path, models: &BTreeMap<String, ModelPricing>) -> Result<()> {
@@ -147,17 +144,9 @@ fn persist_cached_models(path: &Path, models: &BTreeMap<String, ModelPricing>) -
     let temp = path.with_extension("tmp");
     let bytes = serde_json::to_vec_pretty(models).context("failed to encode cached pricing")?;
     fs::write(&temp, bytes).with_context(|| format!("failed to write {}", temp.display()))?;
-    fs::rename(&temp, path).with_context(|| format!("failed to move {} into place", temp.display()))?;
+    fs::rename(&temp, path)
+        .with_context(|| format!("failed to move {} into place", temp.display()))?;
     Ok(())
-}
-
-fn load_bundled_models() -> Result<BTreeMap<String, ModelPricing>> {
-    let raw = serde_json::from_str::<BTreeMap<String, ModelPricing>>(BUNDLED_MODELS_JSON)
-        .context("failed to parse bundled model pricing")?;
-    Ok(raw
-        .into_iter()
-        .map(|(key, value)| (key.to_lowercase(), value.with_fallbacks()))
-        .collect())
 }
 
 fn load_cached_models(path: &Path) -> Result<BTreeMap<String, ModelPricing>> {
@@ -185,50 +174,139 @@ fn cache_is_stale(path: &Path) -> Result<bool> {
     Ok(age.as_secs() >= CACHE_TTL_SECS)
 }
 
-fn merge_fill_only(base: &mut BTreeMap<String, ModelPricing>, extra: BTreeMap<String, ModelPricing>) {
-    for (key, value) in extra {
-        base.entry(key).or_insert_with(|| value.with_fallbacks());
+fn merge_with_priority(
+    lower: BTreeMap<String, ModelPricing>,
+    higher: BTreeMap<String, ModelPricing>,
+) -> BTreeMap<String, ModelPricing> {
+    let mut merged = lower;
+    for (key, value) in higher {
+        merged.insert(key, value.with_fallbacks());
     }
+    merged
 }
 
-fn map_models_dev_to_local(payload: &serde_json::Value) -> BTreeMap<String, ModelPricing> {
-    let mut result = BTreeMap::new();
-    let providers = payload.get("providers").and_then(|value| value.as_object());
-    let Some(providers) = providers else {
-        return result;
-    };
+fn lookup_model<'a>(
+    models: &'a BTreeMap<String, ModelPricing>,
+    model_id: &str,
+) -> Option<&'a ModelPricing> {
+    let lowercase = model_id.to_lowercase();
+    if let Some(value) = models.get(&lowercase) {
+        return Some(value);
+    }
 
-    for (provider_id, provider_data) in providers {
-        let models = provider_data.get("models").and_then(|value| value.as_object());
-        let Some(models) = models else {
-            continue;
-        };
+    let normalized = normalize_model_key(model_id);
+    if let Some(value) = models.get(&normalized) {
+        return Some(value);
+    }
 
-        for (model_id, model_data) in models {
-            let cost = model_data.get("cost").and_then(|value| value.as_object());
-            let limit = model_data.get("limit").and_then(|value| value.as_object());
-
-            let pricing = ModelPricing {
-                input: decimal_from_json(cost.and_then(|map| map.get("prompt"))),
-                output: decimal_from_json(cost.and_then(|map| map.get("completion"))),
-                cache_write: decimal_from_json(cost.and_then(|map| map.get("input_cache_write"))),
-                cache_read: decimal_from_json(cost.and_then(|map| map.get("input_cache_read"))),
-                context_window: limit
-                    .and_then(|map| map.get("context"))
-                    .and_then(|value| value.as_u64())
-                    .unwrap_or_default(),
-                session_quota: Decimal::ZERO,
-            }
-            .with_fallbacks();
-
-            let bare = model_id.to_lowercase();
-            let prefixed = format!("{}/{}", provider_id.to_lowercase(), bare);
-            result.entry(bare).or_insert_with(|| pricing.clone());
-            result.entry(prefixed).or_insert(pricing);
+    if let Some((_, bare)) = lowercase.split_once('/') {
+        let normalized_bare = normalize_model_key(bare);
+        if let Some(value) = models.get(&normalized_bare) {
+            return Some(value);
         }
     }
 
+    None
+}
+
+pub(crate) fn map_models_root_to_local(
+    default_provider: &str,
+    payload: &serde_json::Value,
+) -> BTreeMap<String, ModelPricing> {
+    let mut result = BTreeMap::new();
+
+    if let Some(providers) = payload.get("providers").and_then(|value| value.as_object()) {
+        for (provider_id, provider_data) in providers {
+            collect_provider_models(&mut result, provider_id, provider_data.get("models"));
+        }
+        return result;
+    }
+
+    if let Some(root) = payload.as_object() {
+        if !default_provider.is_empty() {
+            collect_provider_models(
+                &mut result,
+                default_provider,
+                payload.get("models").or(Some(payload)),
+            );
+            return result;
+        }
+
+        if root.values().any(|value| value.get("models").is_some()) {
+            for (provider_id, provider_data) in root {
+                collect_provider_models(&mut result, provider_id, provider_data.get("models"));
+            }
+            return result;
+        }
+    }
+
+    collect_provider_models(
+        &mut result,
+        default_provider,
+        payload.get("models").or(Some(payload)),
+    );
     result
+}
+
+fn collect_provider_models(
+    result: &mut BTreeMap<String, ModelPricing>,
+    provider_id: &str,
+    models_root: Option<&serde_json::Value>,
+) {
+    let Some(models) = models_root.and_then(|value| value.as_object()) else {
+        return;
+    };
+
+    for (model_id, model_data) in models {
+        let Some(pricing) = pricing_from_model(model_data) else {
+            continue;
+        };
+
+        let bare = normalize_model_key(model_id);
+        let provider = provider_id.to_lowercase();
+        let key = if provider.is_empty() {
+            bare
+        } else {
+            format!("{provider}/{bare}")
+        };
+        result.insert(key, pricing);
+    }
+}
+
+fn pricing_from_model(model_data: &serde_json::Value) -> Option<ModelPricing> {
+    let cost = model_data.get("cost").and_then(|value| value.as_object())?;
+    let limit = model_data.get("limit").and_then(|value| value.as_object());
+
+    Some(
+        ModelPricing {
+            input: decimal_from_json(
+                cost.get("input")
+                    .or_else(|| cost.get("prompt"))
+                    .or_else(|| cost.get("prompt_text")),
+            ),
+            output: decimal_from_json(
+                cost.get("output")
+                    .or_else(|| cost.get("completion"))
+                    .or_else(|| cost.get("completion_text")),
+            ),
+            cache_write: decimal_from_json(
+                cost.get("cache_write")
+                    .or_else(|| cost.get("input_cache_write"))
+                    .or_else(|| cost.get("write")),
+            ),
+            cache_read: decimal_from_json(
+                cost.get("cache_read")
+                    .or_else(|| cost.get("input_cache_read"))
+                    .or_else(|| cost.get("read")),
+            ),
+            context_window: limit
+                .and_then(|map| map.get("context"))
+                .and_then(|value| value.as_u64())
+                .unwrap_or_default(),
+            session_quota: Decimal::ZERO,
+        }
+        .with_fallbacks(),
+    )
 }
 
 fn decimal_from_json(value: Option<&serde_json::Value>) -> Decimal {
@@ -265,7 +343,11 @@ pub fn normalize_model_key(model_id: &str) -> String {
     model = regexless_replace_version(&model, "gpt-");
 
     if let Some(stripped) = model.strip_prefix("kimi-k-") {
-        if stripped.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+        if stripped
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_digit())
+        {
             model = format!("kimi-k{stripped}");
         }
     }
@@ -294,12 +376,19 @@ fn regexless_replace_version(value: &str, prefix: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_model_key, ModelPricing};
+    use super::{ModelPricing, map_models_root_to_local, normalize_model_key};
+    use crate::db::models::{DataSourceKind, TokenUsage, UsageEvent};
     use rust_decimal::Decimal;
+    use serde_json::json;
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
 
     #[test]
     fn normalizes_date_suffixes() {
-        assert_eq!(normalize_model_key("claude-sonnet-4-5-20250514"), "claude-sonnet-4.5");
+        assert_eq!(
+            normalize_model_key("claude-sonnet-4-5-20250514"),
+            "claude-sonnet-4.5"
+        );
         assert_eq!(normalize_model_key("gpt-5-1"), "gpt-5.1");
     }
 
@@ -317,5 +406,66 @@ mod tests {
 
         assert_eq!(pricing.cache_write, Decimal::new(3, 0));
         assert_eq!(pricing.cache_read, Decimal::new(3, 0) * Decimal::new(1, 1));
+    }
+
+    #[test]
+    fn maps_models_dev_root() {
+        let mapped = map_models_root_to_local(
+            "",
+            &json!({
+                "openai": {
+                    "id": "openai",
+                    "models": {
+                        "gpt-5": {
+                            "cost": { "input": 1, "output": 2, "cache_read": 0.1, "cache_write": 0.2 },
+                            "limit": { "context": 1000, "output": 100 }
+                        }
+                    }
+                }
+            }),
+        );
+
+        assert_eq!(mapped.get("openai/gpt-5").unwrap().input, Decimal::ONE);
+    }
+
+    #[test]
+    fn provider_lookup_does_not_fall_back_to_bare_model() {
+        let mut models = BTreeMap::new();
+        models.insert(
+            "anthropic/claude-sonnet-4.5".to_string(),
+            ModelPricing {
+                input: Decimal::ONE,
+                output: Decimal::new(2, 0),
+                cache_write: Decimal::ONE,
+                cache_read: Decimal::new(1, 1),
+                context_window: 0,
+                session_quota: Decimal::ZERO,
+            },
+        );
+        let catalog = super::PricingCatalog {
+            models,
+            cache_path: PathBuf::from("/tmp/models.json"),
+            refresh_needed: false,
+        };
+        let event = UsageEvent {
+            session_id: "ses".to_string(),
+            parent_session_id: None,
+            session_title: None,
+            session_started_at: None,
+            session_archived_at: None,
+            project_name: None,
+            project_path: None,
+            provider_id: Some("openai".to_string()),
+            model_id: "claude-sonnet-4.5".to_string(),
+            agent: None,
+            finish_reason: None,
+            tokens: TokenUsage::default(),
+            created_at: None,
+            completed_at: None,
+            stored_cost_usd: None,
+            source: DataSourceKind::Json,
+        };
+
+        assert!(catalog.lookup_for_event(&event).is_none());
     }
 }

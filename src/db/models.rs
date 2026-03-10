@@ -35,6 +35,7 @@ pub struct UsageEvent {
     pub session_archived_at: Option<DateTime<Local>>,
     pub project_name: Option<String>,
     pub project_path: Option<PathBuf>,
+    pub provider_id: Option<String>,
     pub model_id: String,
     pub agent: Option<String>,
     pub finish_reason: Option<String>,
@@ -46,6 +47,12 @@ pub struct UsageEvent {
 }
 
 impl UsageEvent {
+    pub fn pricing_model_id(&self) -> Option<String> {
+        self.provider_id
+            .as_deref()
+            .map(|provider| format!("{provider}/{}", self.model_id))
+    }
+
     pub fn activity_date(&self) -> Option<NaiveDate> {
         self.created_at
             .as_ref()
@@ -191,6 +198,8 @@ pub struct InputOptions {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct JsonMessageRecord {
     pub role: Option<String>,
+    #[serde(rename = "providerID")]
+    pub provider_id: Option<String>,
     #[serde(rename = "modelID")]
     pub model_id: Option<String>,
     pub model: Option<JsonModelRecord>,
@@ -204,6 +213,8 @@ pub struct JsonMessageRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct JsonModelRecord {
+    #[serde(rename = "providerID")]
+    pub provider_id: Option<String>,
     #[serde(rename = "modelID")]
     pub model_id: Option<String>,
 }

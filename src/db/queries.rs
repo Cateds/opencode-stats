@@ -256,6 +256,12 @@ fn parse_json_record(
             .unwrap_or(0),
     };
 
+    let provider_id = record.provider_id.clone().or_else(|| {
+        record
+            .model
+            .as_ref()
+            .and_then(|model| model.provider_id.clone())
+    });
     let model_id = record
         .model_id
         .or_else(|| record.model.and_then(|model| model.model_id))
@@ -284,6 +290,7 @@ fn parse_json_record(
             .as_ref()
             .and_then(|path| path.cwd.clone().or(path.root.clone()))
             .or_else(|| session.project_worktree.clone()),
+        provider_id,
         model_id,
         agent: record.agent,
         finish_reason: record.finish,
@@ -480,6 +487,7 @@ mod tests {
     fn parses_assistant_json_record() {
         let record = JsonMessageRecord {
             role: Some("assistant".to_string()),
+            provider_id: Some("anthropic".to_string()),
             model_id: Some("claude-sonnet-4.5".to_string()),
             tokens: Some(JsonTokensRecord {
                 input: Some(10),
@@ -516,5 +524,6 @@ mod tests {
         let event = parse_json_record(record, &session, DataSourceKind::Json).unwrap();
         assert_eq!(event.tokens.total(), 33);
         assert_eq!(event.model_id, "claude-sonnet-4.5");
+        assert_eq!(event.provider_id.as_deref(), Some("anthropic"));
     }
 }
