@@ -1,9 +1,10 @@
 use std::str::FromStr;
 
 use anyhow::anyhow;
+use clap::ValueEnum;
 use ratatui::style::{Color, Modifier, Style};
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum ThemeMode {
     #[default]
     Dark,
@@ -26,13 +27,11 @@ impl FromStr for ThemeMode {
 
 #[derive(Clone, Debug)]
 pub struct Theme {
-    pub foreground: Color,
     pub muted: Color,
     pub accent: Color,
     pub comparison: Color,
     pub tab_active_fg: Color,
     pub tab_active_bg: Color,
-    pub divider: Color,
     pub heat_0: Color,
     pub heat_3: Color,
     pub model_series: [Color; 12],
@@ -42,13 +41,11 @@ impl Theme {
     pub fn from_mode(mode: ThemeMode) -> Self {
         match mode {
             ThemeMode::Dark => Self {
-                foreground: Color::White,
                 muted: Color::Rgb(128, 134, 152),
                 accent: Color::Rgb(136, 192, 208),
                 comparison: Color::Rgb(180, 190, 254),
                 tab_active_fg: Color::Black,
                 tab_active_bg: Color::Rgb(136, 192, 208),
-                divider: Color::Rgb(94, 98, 115),
                 heat_0: Color::Rgb(94, 98, 115),
                 heat_3: Color::Rgb(136, 192, 208),
                 model_series: [
@@ -67,13 +64,11 @@ impl Theme {
                 ],
             },
             ThemeMode::Light => Self {
-                foreground: Color::Black,
                 muted: Color::Rgb(90, 98, 115),
                 accent: Color::Rgb(0, 122, 163),
                 comparison: Color::Rgb(94, 92, 230),
                 tab_active_fg: Color::White,
                 tab_active_bg: Color::Rgb(0, 122, 163),
-                divider: Color::Rgb(160, 170, 186),
                 heat_0: Color::Rgb(160, 170, 186),
                 heat_3: Color::Rgb(0, 122, 163),
                 model_series: [
@@ -94,12 +89,6 @@ impl Theme {
         }
     }
 
-    pub fn title_style(&self) -> Style {
-        Style::default()
-            .fg(self.foreground)
-            .add_modifier(Modifier::BOLD)
-    }
-
     pub fn muted_style(&self) -> Style {
         Style::default().fg(self.muted)
     }
@@ -114,10 +103,6 @@ impl Theme {
         Style::default()
             .fg(self.comparison)
             .add_modifier(Modifier::BOLD)
-    }
-
-    pub fn divider_style(&self) -> Style {
-        Style::default().fg(self.divider)
     }
 
     pub fn series_color(&self, index: usize) -> Color {

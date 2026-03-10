@@ -1,4 +1,3 @@
-use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 
 pub fn format_tokens(value: u64) -> String {
@@ -15,26 +14,6 @@ pub fn format_usd_precise(value: Decimal) -> String {
         format!("${:.2}", value.round_dp(2))
     } else {
         format!("${:.4}", value.round_dp(4))
-    }
-}
-
-pub fn format_relative_time(timestamp: Option<DateTime<Local>>) -> String {
-    let Some(timestamp) = timestamp else {
-        return "No activity".to_string();
-    };
-
-    let now = Local::now();
-    let diff = now - timestamp;
-    if diff.num_seconds() < 60 {
-        "just now".to_string()
-    } else if diff.num_minutes() < 60 {
-        format!("{}m ago", diff.num_minutes())
-    } else if diff.num_hours() < 24 {
-        format!("{}h ago", diff.num_hours())
-    } else if diff.num_days() < 30 {
-        format!("{}d ago", diff.num_days())
-    } else {
-        timestamp.format("%Y-%m-%d").to_string()
     }
 }
 

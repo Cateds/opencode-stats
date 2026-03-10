@@ -1,33 +1,30 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 
 use crate::analytics::AnalyticsSnapshot;
 use crate::ui::theme::Theme;
-use crate::ui::widgets::common::{metric_line, range_selector_line, truncate_label};
+use crate::ui::widgets::common::{left_aligned_content, metric_line};
 use crate::ui::widgets::heatmap::HeatmapWidget;
-use crate::utils::formatting::{format_relative_time, format_tokens, format_usd_precise};
-
-const CONTENT_WIDTH: u16 = 68;
+use crate::utils::formatting::{format_tokens, format_usd_precise};
 
 pub fn render_overview(
     frame: &mut ratatui::Frame<'_>,
     area: Rect,
     snapshot: &AnalyticsSnapshot,
-    range: crate::utils::time::TimeRange,
+    _range: crate::utils::time::TimeRange,
     theme: &Theme,
 ) {
-    let content = left_aligned_content(area, CONTENT_WIDTH);
-    let [heatmap, legend, spacer, ranges, stats, fun] = Layout::default()
+    let content = left_aligned_content(area);
+    let [heatmap, legend, spacer, favorite, stats, fun] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(8),
             Constraint::Length(1),
             Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(5),
             Constraint::Length(2),
-            Constraint::Length(7),
-            Constraint::Min(3),
         ])
         .areas(content);
 
@@ -44,25 +41,31 @@ pub fn render_overview(
         legend,
     );
     frame.render_widget(Paragraph::new(""), spacer);
-    frame.render_widget(Paragraph::new(range_selector_line(range, theme)), ranges);
-
-    let [left, right] = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .areas(stats);
 
     let favorite_model = snapshot
         .models
         .first()
-        .map(|row| truncate_label(&row.model_id, 22))
+        .map(|row| row.model_id.clone())
         .unwrap_or_else(|| "n/a".to_string());
-
-    let left_text = Text::from(vec![
-        Line::from(vec![
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
             Span::styled("Favorite model: ", theme.muted_style()),
             Span::styled(favorite_model, theme.accent_style()),
-        ]),
-        Line::from(""),
+        ])),
+        favorite,
+    );
+
+    let [left, right] = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .areas(stats);
+
+    let left_text = Text::from(vec![
+        metric_line(
+            "Total tokens: ",
+            format_tokens(snapshot.overview.total_tokens),
+            theme,
+        ),
         metric_line(
             "Input: ",
             format_tokens(snapshot.overview.input_tokens),
@@ -78,20 +81,10 @@ pub fn render_overview(
             format_tokens(snapshot.overview.cache_tokens),
             theme,
         ),
-        Line::from(""),
-        metric_line("Sessions: ", snapshot.overview.sessions.to_string(), theme),
     ]);
     frame.render_widget(Paragraph::new(left_text), left);
 
     let right_text = Text::from(vec![
-        Line::from(vec![
-            Span::styled("Total tokens: ", theme.muted_style()),
-            Span::styled(
-                format_tokens(snapshot.overview.total_tokens),
-                theme.title_style(),
-            ),
-        ]),
-        Line::from(""),
         metric_line(
             "Total cost: ",
             format_usd_precise(snapshot.overview.total_cost),
@@ -112,36 +105,21 @@ pub fn render_overview(
             snapshot.overview.active_days.to_string(),
             theme,
         ),
-        metric_line(
-            "Avg/day: ",
-            format_tokens(snapshot.overview.average_tokens_per_day),
-            theme,
-        ),
-        metric_line(
-            "Latest activity: ",
-            format_relative_time(snapshot.overview.latest_activity),
-            theme,
-        ),
     ]);
     frame.render_widget(Paragraph::new(right_text), right);
 
-    let fun_text = Paragraph::new(Text::from(vec![
-        Line::from(vec![Span::styled("Usage comparison", theme.accent_style())]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            snapshot.overview.fun_comparison.clone(),
-            theme.comparison_style().add_modifier(Modifier::BOLD),
-        )]),
-    ]));
+    let comparison = split_comparison_lines(&snapshot.overview.fun_comparison)
+        .into_iter()
+        .map(|line| Line::from(Span::styled(line, theme.comparison_style())))
+        .collect::<Vec<_>>();
+    let fun_text = Paragraph::new(Text::from(comparison));
     frame.render_widget(fun_text, fun);
 }
 
-fn left_aligned_content(area: Rect, width: u16) -> Rect {
-    let width = width.min(area.width);
-    Rect {
-        x: area.x,
-        y: area.y,
-        width,
-        height: area.height,
+fn split_comparison_lines(text: &str) -> Vec<String> {
+    if let Some((left, right)) = text.split_once(", ") {
+        vec![format!("{left},"), format!("{}{right}", " ".repeat(12))]
+    } else {
+        vec![text.to_string()]
     }
 }

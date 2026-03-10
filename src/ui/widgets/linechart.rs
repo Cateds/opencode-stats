@@ -30,7 +30,8 @@ pub fn build_chart<'a>(chart: &'a ModelChartData, theme: &'a Theme) -> Chart<'a>
                 .iter()
                 .map(|label| Line::from(label.clone()))
                 .collect::<Vec<_>>(),
-        );
+        )
+        .labels_alignment(ratatui::layout::Alignment::Center);
 
     let y_axis = Axis::default()
         .bounds(chart.y_bounds)

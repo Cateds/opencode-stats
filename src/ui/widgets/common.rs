@@ -1,26 +1,32 @@
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::ui::theme::Theme;
-use crate::utils::time::TimeRange;
 
-pub fn range_selector_line(range: TimeRange, theme: &Theme) -> Line<'static> {
-    let options = [TimeRange::All, TimeRange::Last7Days, TimeRange::Last30Days];
-    let mut spans = Vec::new();
+pub const CONTENT_WIDTH: u16 = 70;
 
-    for (index, option) in options.into_iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::styled(" | ", theme.muted_style()));
-        }
-
-        let style = if option == range {
-            theme.accent_style()
-        } else {
-            theme.muted_style()
-        };
-        spans.push(Span::styled(option.label().to_string(), style));
+pub fn left_aligned_content(area: Rect) -> Rect {
+    let width = CONTENT_WIDTH.min(area.width);
+    Rect {
+        x: area.x,
+        y: area.y,
+        width,
+        height: area.height,
     }
+}
 
-    Line::from(spans)
+pub fn segment_span(label: &str, active: bool, theme: &Theme) -> Span<'static> {
+    let style = if active {
+        Style::default()
+            .fg(theme.tab_active_fg)
+            .bg(theme.tab_active_bg)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        theme.muted_style()
+    };
+
+    Span::styled(format!(" {} ", label), style)
 }
 
 pub fn truncate_label(value: &str, max_chars: usize) -> String {

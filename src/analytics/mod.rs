@@ -6,7 +6,7 @@ pub mod weekly;
 
 use std::collections::BTreeSet;
 
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
 use crate::analytics::daily::aggregate_daily;
@@ -29,8 +29,6 @@ pub struct OverviewStats {
     pub interactions: usize,
     pub models_used: usize,
     pub active_days: usize,
-    pub average_tokens_per_day: u64,
-    pub latest_activity: Option<DateTime<Local>>,
     pub fun_comparison: String,
 }
 
@@ -87,15 +85,6 @@ pub fn build_snapshot(
         .collect::<BTreeSet<_>>()
         .len();
     let active_days = daily.len();
-    let average_tokens_per_day = if active_days == 0 {
-        0
-    } else {
-        total_tokens / active_days as u64
-    };
-    let latest_activity = filtered_events
-        .iter()
-        .filter_map(|event| event.completed_at.or(event.created_at))
-        .max();
 
     AnalyticsSnapshot {
         overview: OverviewStats {
@@ -108,8 +97,6 @@ pub fn build_snapshot(
             interactions,
             models_used,
             active_days,
-            average_tokens_per_day,
-            latest_activity,
             fun_comparison: crate::utils::formatting::tokens_comparison_text(total_tokens),
         },
         models,

@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
 
 #[derive(Debug, Parser)]
 #[command(name = "oc-stats")]
-#[command(about = "Inline OpenCode usage dashboard")]
+#[command(version, about)]
 struct CliArgs {
     #[arg(long = "db", value_name = "PATH")]
     database_path: Option<PathBuf>,

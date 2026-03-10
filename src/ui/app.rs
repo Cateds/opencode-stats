@@ -5,15 +5,16 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use ratatui::{DefaultTerminal, Frame, TerminalOptions, Viewport};
 use tokio::sync::mpsc;
 
-use crate::analytics::{build_snapshot, AnalyticsSnapshot};
-use crate::cache::models_cache::{refresh_remote_models, PricingCatalog};
+use crate::analytics::{AnalyticsSnapshot, build_snapshot};
+use crate::cache::models_cache::{PricingCatalog, refresh_remote_models};
 use crate::db::models::AppData;
 use crate::ui::models::render_models;
 use crate::ui::overview::render_overview;
 use crate::ui::theme::{Theme, ThemeMode};
+use crate::ui::widgets::common::{CONTENT_WIDTH, left_aligned_content, segment_span};
 use crate::utils::time::TimeRange;
 
-const VIEWPORT_HEIGHT: u16 = 27;
+const VIEWPORT_HEIGHT: u16 = 23;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Page {
@@ -23,13 +24,6 @@ pub enum Page {
 }
 
 impl Page {
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Overview => "Overview",
-            Self::Models => "Models",
-        }
-    }
-
     pub fn next(self) -> Self {
         match self {
             Self::Overview => Self::Models,
@@ -117,19 +111,21 @@ impl App {
         let area = frame.area();
         let vertical = ratatui::layout::Layout::vertical([
             ratatui::layout::Constraint::Length(1),
-            ratatui::layout::Constraint::Length(3),
-            ratatui::layout::Constraint::Min(20),
-            ratatui::layout::Constraint::Length(2),
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Min(16),
+            ratatui::layout::Constraint::Length(1),
         ]);
-        let [divider, header, body, footer] = vertical.areas(area);
+        let [divider, header, spacer, body, footer] = vertical.areas(area);
 
         frame.render_widget(
-            ratatui::widgets::Paragraph::new("─".repeat(divider.width as usize))
-                .style(theme.divider_style()),
+            ratatui::widgets::Paragraph::new("─".repeat(CONTENT_WIDTH as _))
+                .style(theme.muted_style()),
             divider,
         );
 
         self.render_header(frame, header, &theme);
+        frame.render_widget(ratatui::widgets::Paragraph::new(""), spacer);
 
         match self.page {
             Page::Overview => render_overview(frame, body, &self.snapshot, self.range, &theme),
@@ -147,50 +143,35 @@ impl App {
     }
 
     fn render_header(&self, frame: &mut Frame<'_>, area: ratatui::layout::Rect, theme: &Theme) {
-        let title = format!("oc-stats  {}", self.page.title());
-        let tabs = [Page::Overview, Page::Models]
-            .into_iter()
-            .map(|page| {
-                if page == self.page {
-                    ratatui::text::Span::styled(
-                        format!(" {} ", page.title()),
-                        ratatui::style::Style::default()
-                            .fg(theme.tab_active_fg)
-                            .bg(theme.tab_active_bg)
-                            .add_modifier(ratatui::style::Modifier::BOLD),
-                    )
-                } else {
-                    ratatui::text::Span::styled(
-                        format!(" {} ", page.title()),
-                        ratatui::style::Style::default().fg(theme.muted),
-                    )
-                }
-            })
-            .collect::<Vec<_>>();
+        let content = left_aligned_content(area);
+        let line = ratatui::text::Line::from(vec![
+            segment_span("Overview", self.page == Page::Overview, theme),
+            ratatui::text::Span::raw(" "),
+            segment_span("Models", self.page == Page::Models, theme),
+            ratatui::text::Span::raw("     "),
+            segment_span("All", self.range == TimeRange::All, theme),
+            ratatui::text::Span::raw(" "),
+            segment_span("7 Days", self.range == TimeRange::Last7Days, theme),
+            ratatui::text::Span::raw(" "),
+            segment_span("30 Days", self.range == TimeRange::Last30Days, theme),
+            ratatui::text::Span::raw("    "),
+            ratatui::text::Span::styled(
+                format!("Source: {:?}", self.data.source),
+                theme.muted_style(),
+            ),
+        ]);
 
-        let range_text = format!(
-            "Range: {}   Source: {:?}",
-            self.range.label(),
-            self.data.source
-        );
-        let header = ratatui::widgets::Paragraph::new(ratatui::text::Text::from(vec![
-            ratatui::text::Line::from(vec![
-                ratatui::text::Span::styled(title, theme.title_style()),
-                ratatui::text::Span::raw("    "),
-                ratatui::text::Span::styled(range_text, theme.muted_style()),
-            ]),
-            ratatui::text::Line::from(tabs),
-        ]));
-        frame.render_widget(header, area);
+        frame.render_widget(ratatui::widgets::Paragraph::new(line), content);
     }
 
     fn render_footer(&self, frame: &mut Frame<'_>, area: ratatui::layout::Rect, theme: &Theme) {
-        let status = self.status_message.as_deref().unwrap_or(
-            "Tab/Left/Right switch pages | r cycle range | 1/2/3 quick pick\nj/k or up/down focus model | Ctrl+S copy | q exit",
-        );
+        let status = self
+            .status_message
+            .as_deref()
+            .unwrap_or("tab/←/→ pages | r cycle | 1/2/3 pick | <ctrl-s> copy | q exit");
         frame.render_widget(
             ratatui::widgets::Paragraph::new(status).style(theme.muted_style()),
-            area,
+            left_aligned_content(area),
         );
     }
 
