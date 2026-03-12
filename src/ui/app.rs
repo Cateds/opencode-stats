@@ -118,16 +118,17 @@ impl App {
         });
 
         let app_result = self.run_loop(&mut terminal);
-        Self::restore(&mut terminal);
+        Self::restore(&mut terminal)?;
         app_result
     }
 
     /// 默认的 ratatui::restore 在 Inline Viewport 下有错误的行为，
     /// 此处重置终端以确保光标和输入状态正确恢复
-    fn restore(terminal: &mut DefaultTerminal) {
-        terminal.clear().expect("Failed to clear terminal.");
-        crossterm::terminal::disable_raw_mode().expect("Failed to disable raw mode.");
+    fn restore(terminal: &mut DefaultTerminal) -> Result<()>{
+        terminal.clear()?;
+        crossterm::terminal::disable_raw_mode()?;
         print_exit_art();
+        Ok(())
     }
 
     fn run_loop(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
