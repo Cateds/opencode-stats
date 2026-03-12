@@ -1,4 +1,6 @@
-use anyhow::{Context, Result};
+use std::time::Duration;
+
+use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
 
 pub async fn fetch_json(url: &str) -> Result<Value> {
@@ -9,11 +11,18 @@ pub async fn fetch_json(url: &str) -> Result<Value> {
 
     let response = client
         .get(url)
+        .timeout(Duration::from_secs(30))
         .send()
         .await
-        .with_context(|| format!("failed to fetch {}", url))?
+        .map_err(|e| {
+            if e.is_timeout() {
+                anyhow!("Fetch {url} timed out")
+            } else {
+                anyhow!("Failed to fetch {url}: {e}")
+            }
+        })?
         .error_for_status()
-        .with_context(|| format!("request to {} failed", url))?;
+        .map_err(|e| anyhow!("request to {url} failed: {e}"))?;
 
     response
         .json::<Value>()

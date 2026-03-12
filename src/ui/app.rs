@@ -78,7 +78,7 @@ pub struct App {
     status_message: Option<StatusMessage>,
     pub focused_model_index: usize,
     pub focused_provider_index: usize,
-    pricing_updates: mpsc::UnboundedReceiver<PricingCatalog>,
+    pricing_updates: mpsc::UnboundedReceiver<Result<PricingCatalog>>,
     clipboard_sender: mpsc::UnboundedSender<ClipboardUpdate>,
     clipboard_updates: mpsc::UnboundedReceiver<ClipboardUpdate>,
     copy_in_progress: bool,
@@ -124,7 +124,7 @@ impl App {
 
     /// 默认的 ratatui::restore 在 Inline Viewport 下有错误的行为，
     /// 此处重置终端以确保光标和输入状态正确恢复
-    fn restore(terminal: &mut DefaultTerminal) -> Result<()>{
+    fn restore(terminal: &mut DefaultTerminal) -> Result<()> {
         terminal.clear()?;
         crossterm::terminal::disable_raw_mode()?;
         print_exit_art();
@@ -135,9 +135,13 @@ impl App {
         while !self.should_quit {
             self.clear_expired_status();
             while let Ok(pricing) = self.pricing_updates.try_recv() {
-                self.pricing = pricing;
-                self.recompute();
-                self.set_status("Pricing cache refreshed from models.dev");
+                if let Ok(pricing) = pricing {
+                    self.pricing = pricing;
+                    self.recompute();
+                    self.set_status("Pricing cache refreshed from models.dev");
+                } else {
+                    self.set_status("Failed to refresh cache from models.dev");
+                }
             }
             while let Ok(update) = self.clipboard_updates.try_recv() {
                 self.copy_in_progress = false;

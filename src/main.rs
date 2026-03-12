@@ -81,8 +81,12 @@ async fn run_cache_command(command: Command) -> Result<()> {
                 let path = default_cache_path()?;
                 let (sender, mut receiver) = mpsc::unbounded_channel();
                 refresh_remote_models(path.clone(), sender).await;
-                let _ = receiver.try_recv();
-                println!("Updated {}", path.display());
+                let result = receiver.try_recv();
+                if let Ok(Ok(_)) = result {
+                    println!("Updated {}", path.display());
+                } else {
+                    println!("Failed to update {}", path.display());
+                }
                 Ok(())
             }
             CacheCommand::Clean => {
