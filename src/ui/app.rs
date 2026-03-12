@@ -140,7 +140,10 @@ impl App {
                     self.recompute();
                     self.set_status("Pricing cache refreshed from models.dev");
                 } else {
-                    self.set_status("Failed to refresh cache from models.dev");
+                    self.set_status(format!(
+                        "Failed to refresh cache from models.dev; {}",
+                        self.pricing.refresh_failure_hint()
+                    ));
                 }
             }
             while let Ok(update) = self.clipboard_updates.try_recv() {

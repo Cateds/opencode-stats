@@ -41,11 +41,19 @@ impl ModelPricing {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PricingAvailability {
+    Cached,
+    OverridesOnly,
+    Empty,
+}
+
 #[derive(Clone, Debug)]
 pub struct PricingCatalog {
     pub models: BTreeMap<String, ModelPricing>,
     pub cache_path: PathBuf,
     pub refresh_needed: bool,
+    pub availability: PricingAvailability,
 }
 
 impl PricingCatalog {
@@ -54,12 +62,20 @@ impl PricingCatalog {
         let cached = load_cached_models(&cache_path).unwrap_or_default();
         let config = opencode_config::load_pricing_overrides()?;
         let refresh_needed = cache_is_stale(&cache_path).unwrap_or(true);
+        let availability = if !cached.is_empty() {
+            PricingAvailability::Cached
+        } else if !config.is_empty() {
+            PricingAvailability::OverridesOnly
+        } else {
+            PricingAvailability::Empty
+        };
         let merged = merge_with_priority(cached, config);
 
         Ok(Self {
             models: merged,
             cache_path,
             refresh_needed,
+            availability,
         })
     }
 
@@ -94,6 +110,14 @@ impl PricingCatalog {
         self.lookup_for_event(event).is_some()
     }
 
+    pub fn refresh_failure_hint(&self) -> &'static str {
+        match self.availability {
+            PricingAvailability::Cached => "continuing with cached pricing and local overrides",
+            PricingAvailability::OverridesOnly => "using local pricing overrides only",
+            PricingAvailability::Empty => "no cached pricing is available",
+        }
+    }
+
     fn from_sources(cache_path: PathBuf, remote: BTreeMap<String, ModelPricing>) -> Result<Self> {
         let config = opencode_config::load_pricing_overrides()?;
         let merged = merge_with_priority(remote, config);
@@ -101,6 +125,7 @@ impl PricingCatalog {
             models: merged,
             cache_path,
             refresh_needed: false,
+            availability: PricingAvailability::Cached,
         })
     }
 }
@@ -125,8 +150,12 @@ pub async fn refresh_remote_models(
     cache_path: PathBuf,
     sender: mpsc::UnboundedSender<Result<PricingCatalog>>,
 ) {
-    let fetch_result = fetch_remote_catalog(&cache_path).await;
+    let fetch_result = refresh_pricing_catalog(cache_path).await;
     let _ = sender.send(fetch_result);
+}
+
+pub async fn refresh_pricing_catalog(cache_path: PathBuf) -> Result<PricingCatalog> {
+    fetch_remote_catalog(&cache_path).await
 }
 
 async fn fetch_remote_catalog(cache_path: &Path) -> Result<PricingCatalog> {
@@ -458,6 +487,7 @@ mod tests {
             models,
             cache_path: PathBuf::from("/tmp/models.json"),
             refresh_needed: false,
+            availability: super::PricingAvailability::Cached,
         };
         let event = UsageEvent {
             session_id: "ses".to_string(),
