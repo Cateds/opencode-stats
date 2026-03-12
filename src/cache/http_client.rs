@@ -3,15 +3,19 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
 
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub async fn fetch_json(url: &str) -> Result<Value> {
     let client = reqwest::Client::builder()
         .user_agent("oc-stats/0.1")
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
         .build()
         .context("failed to build HTTP client")?;
 
     let response = client
         .get(url)
-        .timeout(Duration::from_secs(30))
         .send()
         .await
         .map_err(|e| {

@@ -15,14 +15,17 @@ pub struct TokenUsage {
 
 impl TokenUsage {
     pub fn total(&self) -> u64 {
-        self.input + self.output + self.cache_read + self.cache_write
+        self.input
+            .saturating_add(self.output)
+            .saturating_add(self.cache_read)
+            .saturating_add(self.cache_write)
     }
 
     pub fn add_assign(&mut self, other: &TokenUsage) {
-        self.input += other.input;
-        self.output += other.output;
-        self.cache_read += other.cache_read;
-        self.cache_write += other.cache_write;
+        self.input = self.input.saturating_add(other.input);
+        self.output = self.output.saturating_add(other.output);
+        self.cache_read = self.cache_read.saturating_add(other.cache_read);
+        self.cache_write = self.cache_write.saturating_add(other.cache_write);
     }
 }
 
@@ -243,6 +246,36 @@ impl ImportStats {
 
 fn pluralize<'a>(count: usize, singular: &'a str, plural: &'a str) -> &'a str {
     if count == 1 { singular } else { plural }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TokenUsage;
+
+    #[test]
+    fn token_usage_saturates_instead_of_overflowing() {
+        let mut usage = TokenUsage {
+            input: u64::MAX,
+            output: 1,
+            cache_read: 0,
+            cache_write: 0,
+        };
+
+        assert_eq!(usage.total(), u64::MAX);
+
+        usage.add_assign(&TokenUsage {
+            input: 10,
+            output: 20,
+            cache_read: 30,
+            cache_write: 40,
+        });
+
+        assert_eq!(usage.input, u64::MAX);
+        assert_eq!(usage.output, 21);
+        assert_eq!(usage.cache_read, 30);
+        assert_eq!(usage.cache_write, 40);
+        assert_eq!(usage.total(), u64::MAX);
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -77,22 +77,15 @@ pub fn build_snapshot(
     );
     let heatmap = build_heatmap_data(&data.events, today);
 
-    let total_tokens = filtered_events
-        .iter()
-        .map(|event| event.tokens.total())
-        .sum::<u64>();
-    let input_tokens = filtered_events
-        .iter()
-        .map(|event| event.tokens.input)
-        .sum::<u64>();
-    let output_tokens = filtered_events
-        .iter()
-        .map(|event| event.tokens.output)
-        .sum::<u64>();
-    let cache_tokens = filtered_events
-        .iter()
-        .map(|event| event.tokens.cache_read + event.tokens.cache_write)
-        .sum::<u64>();
+    let total_tokens = saturating_sum(filtered_events.iter().map(|event| event.tokens.total()));
+    let input_tokens = saturating_sum(filtered_events.iter().map(|event| event.tokens.input));
+    let output_tokens = saturating_sum(filtered_events.iter().map(|event| event.tokens.output));
+    let cache_tokens = saturating_sum(filtered_events.iter().map(|event| {
+        event
+            .tokens
+            .cache_read
+            .saturating_add(event.tokens.cache_write)
+    }));
     let mut total_cost = PriceSummary::default();
     for event in &filtered_events {
         if let Some(cost) = event.stored_cost_usd {
@@ -147,6 +140,12 @@ pub fn build_snapshot(
         provider_chart,
         heatmap,
     }
+}
+
+fn saturating_sum(values: impl IntoIterator<Item = u64>) -> u64 {
+    values
+        .into_iter()
+        .fold(0u64, |total, value| total.saturating_add(value))
 }
 
 fn filter_events(events: &[UsageEvent], range: TimeRange, today: NaiveDate) -> Vec<UsageEvent> {
@@ -215,6 +214,7 @@ mod tests {
     use crate::db::models::{
         AppData, DataSourceKind, ImportStats, MessageRecord, SessionRecord, TokenUsage, UsageEvent,
     };
+    use crate::utils::pricing::PriceSummary;
     use crate::utils::time::TimeRange;
     use chrono::{Local, TimeZone};
     use std::collections::BTreeMap;
@@ -364,5 +364,75 @@ mod tests {
         let snapshot = build_snapshot(&data, &pricing, TimeRange::All);
 
         assert_eq!(snapshot.overview.sessions, 1);
+    }
+
+    #[test]
+    fn overview_cost_prefers_stored_event_cost() {
+        let created_at = Local
+            .with_ymd_and_hms(2026, 3, 12, 9, 30, 0)
+            .single()
+            .unwrap();
+        let mut models = BTreeMap::new();
+        models.insert(
+            "openai/gpt-5".to_string(),
+            crate::cache::models_cache::ModelPricing {
+                input: rust_decimal::Decimal::new(100, 0),
+                output: rust_decimal::Decimal::new(100, 0),
+                cache_write: rust_decimal::Decimal::ZERO,
+                cache_read: rust_decimal::Decimal::ZERO,
+                context_window: 0,
+                session_quota: rust_decimal::Decimal::ZERO,
+            },
+        );
+        let data = AppData {
+            events: vec![UsageEvent {
+                session_id: "ses_1".to_string(),
+                parent_session_id: None,
+                session_title: None,
+                session_started_at: Some(created_at),
+                session_archived_at: None,
+                project_name: None,
+                project_path: None,
+                provider_id: Some("openai".to_string()),
+                model_id: "gpt-5".to_string(),
+                agent: None,
+                finish_reason: Some("stop".to_string()),
+                tokens: TokenUsage {
+                    input: 1_000_000,
+                    output: 1_000_000,
+                    cache_read: 0,
+                    cache_write: 0,
+                },
+                created_at: Some(created_at),
+                completed_at: Some(created_at),
+                stored_cost_usd: Some(rust_decimal::Decimal::ZERO),
+                source: DataSourceKind::Json,
+            }],
+            messages: Vec::new(),
+            session_records: Vec::new(),
+            import_stats: ImportStats::default(),
+            sessions: Vec::new(),
+            source: DataSourceKind::Json,
+        };
+        let pricing = PricingCatalog {
+            models,
+            cache_path: PathBuf::from("/tmp/models.json"),
+            refresh_needed: false,
+            availability: PricingAvailability::Cached,
+            load_notice: None,
+        };
+
+        let snapshot = build_snapshot(&data, &pricing, TimeRange::All);
+
+        assert_eq!(
+            snapshot.overview.total_cost.known,
+            rust_decimal::Decimal::ZERO
+        );
+        assert_eq!(snapshot.overview.total_cost.has_known, true);
+        assert_eq!(snapshot.overview.total_cost.missing, false);
+        assert_eq!(
+            snapshot.overview.total_cost.known,
+            PriceSummary::default().known
+        );
     }
 }

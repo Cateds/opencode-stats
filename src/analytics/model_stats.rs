@@ -84,7 +84,8 @@ pub fn build_model_chart(
         update_cost(&mut entry.cost, pricing, event);
         if let Some(date) = event.activity_date() {
             entry.active_days.insert(date);
-            *entry.daily_tokens.entry(date).or_default() += event.tokens.total();
+            let total = entry.daily_tokens.entry(date).or_default();
+            *total = total.saturating_add(event.tokens.total());
         }
         if event.is_rate_eligible()
             && let Some(duration_ms) = event.duration_ms()
@@ -97,7 +98,7 @@ pub fn build_model_chart(
     let overall_tokens = model_rows
         .values()
         .map(|row| row.tokens.total())
-        .sum::<u64>();
+        .fold(0u64, |total, value| total.saturating_add(value));
     let mut rows = model_rows
         .into_iter()
         .map(|(model_id, row)| ModelUsageRow {
@@ -159,7 +160,8 @@ pub fn build_provider_chart(
         update_cost(&mut entry.cost, pricing, event);
         if let Some(date) = event.activity_date() {
             entry.active_days.insert(date);
-            *entry.daily_tokens.entry(date).or_default() += event.tokens.total();
+            let total = entry.daily_tokens.entry(date).or_default();
+            *total = total.saturating_add(event.tokens.total());
         }
         if event.is_rate_eligible()
             && let Some(duration_ms) = event.duration_ms()
@@ -172,7 +174,7 @@ pub fn build_provider_chart(
     let overall_tokens = provider_rows
         .values()
         .map(|row| row.tokens.total())
-        .sum::<u64>();
+        .fold(0u64, |total, value| total.saturating_add(value));
     let mut rows = provider_rows
         .into_iter()
         .map(|(provider_id, row)| ProviderUsageRow {
@@ -253,11 +255,12 @@ where
         if date > max_date {
             max_date = date;
         }
-        *daily_values
+        let total = daily_values
             .entry(key)
             .or_default()
             .entry(date)
-            .or_default() += event.tokens.total();
+            .or_default();
+        *total = total.saturating_add(event.tokens.total());
     }
 
     if !has_dates {
@@ -301,12 +304,7 @@ where
     }
 
     let last_index = (days.len().saturating_sub(1)) as f64;
-    let middle_index = days.len() / 2;
-    let x_labels = vec![
-        days.first().unwrap().format("%b %d").to_string(),
-        days[middle_index].format("%b %d").to_string(),
-        days.last().unwrap().format("%b %d").to_string(),
-    ];
+    let x_labels = build_x_labels(&days);
     let (y_ticks, y_bounds) = nice_integer_ticks(y_max.max(1.0), 4);
     let y_labels = y_ticks
         .iter()
@@ -319,6 +317,24 @@ where
         x_labels,
         y_labels,
         series,
+    }
+}
+
+fn build_x_labels(days: &[NaiveDate]) -> Vec<String> {
+    match days {
+        [] => vec!["Start".to_string(), "Mid".to_string(), "End".to_string()],
+        [day] => {
+            let label = day.format("%b %d").to_string();
+            vec![label.clone(), label.clone(), label]
+        }
+        _ => {
+            let middle_index = days.len() / 2;
+            vec![
+                days[0].format("%b %d").to_string(),
+                days[middle_index].format("%b %d").to_string(),
+                days[days.len() - 1].format("%b %d").to_string(),
+            ]
+        }
     }
 }
 
@@ -400,5 +416,53 @@ fn median(values: &[f64]) -> f64 {
         (values[middle - 1] + values[middle]) / 2.0
     } else {
         values[middle]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_chart_for_models;
+    use crate::db::models::{DataSourceKind, TokenUsage, UsageEvent};
+    use chrono::{Local, NaiveDate, TimeZone};
+
+    #[test]
+    fn single_day_chart_builds_labels_without_unwrap_assumptions() {
+        let day = NaiveDate::from_ymd_opt(2026, 3, 12).unwrap();
+        let created_at = Local
+            .with_ymd_and_hms(2026, 3, 12, 9, 30, 0)
+            .single()
+            .unwrap();
+        let chart = build_chart_for_models(
+            &[UsageEvent {
+                session_id: "ses_1".to_string(),
+                parent_session_id: None,
+                session_title: None,
+                session_started_at: Some(created_at),
+                session_archived_at: None,
+                project_name: None,
+                project_path: None,
+                provider_id: Some("openai".to_string()),
+                model_id: "gpt-5".to_string(),
+                agent: None,
+                finish_reason: None,
+                tokens: TokenUsage {
+                    input: 1,
+                    output: 2,
+                    cache_read: 0,
+                    cache_write: 0,
+                },
+                created_at: Some(created_at),
+                completed_at: Some(created_at),
+                stored_cost_usd: None,
+                source: DataSourceKind::Json,
+            }],
+            &["gpt-5".to_string()],
+            day,
+            |event| event.model_id.clone(),
+        );
+
+        assert_eq!(chart.x_labels.len(), 3);
+        assert_eq!(chart.x_labels[0], "Mar 12");
+        assert_eq!(chart.x_labels[2], "Mar 12");
     }
 }

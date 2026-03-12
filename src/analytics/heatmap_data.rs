@@ -28,7 +28,8 @@ pub fn build_heatmap_data(events: &[UsageEvent], today: NaiveDate) -> HeatmapDat
         if date < start || date > end {
             continue;
         }
-        *totals.entry(date).or_default() += event.tokens.total();
+        let total = totals.entry(date).or_default();
+        *total = total.saturating_add(event.tokens.total());
     }
 
     let max = totals.values().copied().max().unwrap_or_default();
