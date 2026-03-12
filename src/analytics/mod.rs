@@ -185,7 +185,7 @@ mod tests {
     use super::build_snapshot;
     use crate::cache::models_cache::{PricingAvailability, PricingCatalog};
     use crate::db::models::{
-        AppData, DataSourceKind, MessageRecord, SessionRecord, TokenUsage, UsageEvent,
+        AppData, DataSourceKind, ImportStats, MessageRecord, SessionRecord, TokenUsage, UsageEvent,
     };
     use crate::utils::time::TimeRange;
     use chrono::{Local, TimeZone};
@@ -254,6 +254,7 @@ mod tests {
                 created_at,
                 updated_at,
             }],
+            import_stats: ImportStats::default(),
             sessions: Vec::new(),
             source: DataSourceKind::Sqlite,
         };
@@ -261,6 +262,7 @@ mod tests {
             events,
             messages,
             session_records: Vec::new(),
+            import_stats: ImportStats::default(),
             sessions: Vec::new(),
             source: DataSourceKind::Json,
         };
@@ -269,6 +271,7 @@ mod tests {
             cache_path: PathBuf::from("/tmp/models.json"),
             refresh_needed: false,
             availability: PricingAvailability::Empty,
+            load_notice: None,
         };
 
         let sqlite_snapshot = build_snapshot(&sqlite_like, &pricing, TimeRange::All);

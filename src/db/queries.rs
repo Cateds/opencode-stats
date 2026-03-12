@@ -8,8 +8,8 @@ use rusqlite::OptionalExtension;
 
 use crate::db::connection::{discover_database_path, open_database};
 use crate::db::models::{
-    AppData, DataSourceKind, InputOptions, JsonMessageRecord, MessageRecord, SessionRecord,
-    SessionSummary, TokenUsage, UsageEvent,
+    AppData, DataSourceKind, ImportStats, InputOptions, JsonMessageRecord, MessageRecord,
+    SessionRecord, SessionSummary, TokenUsage, UsageEvent,
 };
 use crate::utils::time::timestamp_ms_to_local;
 
@@ -76,18 +76,27 @@ pub fn load_from_sqlite(db_path: &Path) -> Result<AppData> {
         })
     })?;
 
+    let mut sessions = Vec::new();
+    for session in sessions_iter {
+        sessions.push(session?);
+    }
+
+    let session_lookup = sessions
+        .iter()
+        .map(|session| (session.id.clone(), session.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let sqlite_messages = load_messages_sqlite(&conn, &session_lookup)?;
+
     let mut all_events = Vec::new();
     let mut all_messages = Vec::new();
     let mut session_records = Vec::new();
-    for session in sessions_iter {
-        let session = session?;
-        let messages = load_session_messages_sqlite(&conn, &session)?;
-        let events = messages
-            .iter()
-            .filter_map(|message| message.event.clone())
-            .collect::<Vec<_>>();
-        all_messages.extend(messages.into_iter().map(|message| message.record));
-        all_events.extend(events);
+    for message in sqlite_messages.messages {
+        if let Some(event) = message.event {
+            all_events.push(event);
+        }
+        all_messages.push(message.record);
+    }
+    for session in sessions {
         if let (Some(created_at), Some(updated_at)) = (session.time_created, session.time_updated) {
             session_records.push(SessionRecord {
                 session_id: session.id.clone(),
@@ -101,6 +110,10 @@ pub fn load_from_sqlite(db_path: &Path) -> Result<AppData> {
         all_events,
         all_messages,
         session_records,
+        ImportStats {
+            skipped_sqlite_messages: sqlite_messages.skipped_messages,
+            ..ImportStats::default()
+        },
         DataSourceKind::Sqlite,
     )
 }
@@ -110,24 +123,48 @@ struct ParsedMessage {
     event: Option<UsageEvent>,
 }
 
-fn load_session_messages_sqlite(
-    conn: &rusqlite::Connection,
-    session: &SessionRow,
-) -> Result<Vec<ParsedMessage>> {
-    let mut stmt =
-        conn.prepare("SELECT data FROM message WHERE session_id = ? ORDER BY time_created ASC")?;
+struct SqliteMessageLoad {
+    messages: Vec<ParsedMessage>,
+    skipped_messages: usize,
+}
 
-    let rows = stmt.query_map([&session.id], |row| row.get::<_, String>(0))?;
+enum ParseMessagePayload {
+    Parsed(Option<ParsedMessage>),
+    InvalidJson,
+}
+
+fn load_messages_sqlite(
+    conn: &rusqlite::Connection,
+    sessions: &BTreeMap<String, SessionRow>,
+) -> Result<SqliteMessageLoad> {
+    let mut stmt = conn.prepare(
+        "SELECT session_id, data FROM message ORDER BY session_id ASC, time_created ASC",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
     let mut messages = Vec::new();
+    let mut skipped_messages = 0usize;
     for row in rows {
-        let payload = row?;
-        let Some(message) = parse_message_payload(&payload, session, DataSourceKind::Sqlite)?
-        else {
+        let (session_id, payload) = row?;
+        let Some(session) = sessions.get(&session_id) else {
+            skipped_messages = skipped_messages.saturating_add(1);
             continue;
         };
-        messages.push(message);
+
+        match parse_message_payload(&payload, session, DataSourceKind::Sqlite)? {
+            ParseMessagePayload::Parsed(Some(message)) => messages.push(message),
+            ParseMessagePayload::Parsed(None) => {}
+            ParseMessagePayload::InvalidJson => {
+                skipped_messages = skipped_messages.saturating_add(1);
+            }
+        }
     }
-    Ok(messages)
+    Ok(SqliteMessageLoad {
+        messages,
+        skipped_messages,
+    })
 }
 
 pub fn load_from_json(path: &Path) -> Result<AppData> {
@@ -159,7 +196,12 @@ fn load_from_json_directory(path: &Path) -> Result<AppData> {
             .with_context(|| format!("failed to read JSON file {}", file.display()))?;
         let value = serde_json::from_str::<serde_json::Value>(&contents)
             .with_context(|| format!("failed to parse JSON file {}", file.display()))?;
-        values.push(value);
+
+        match value {
+            serde_json::Value::Array(items) => values.extend(items),
+            serde_json::Value::Object(_) => values.push(value),
+            _ => bail!("unsupported JSON input format at {}", file.display()),
+        }
     }
 
     load_from_json_values(values, path)
@@ -183,10 +225,15 @@ fn collect_json_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
 fn load_from_json_values(values: Vec<serde_json::Value>, source_path: &Path) -> Result<AppData> {
     let mut all_events = Vec::new();
     let mut all_messages = Vec::new();
+    let mut import_stats = ImportStats::default();
     for value in values {
         let record: JsonMessageRecord = match serde_json::from_value(value) {
             Ok(record) => record,
-            Err(_) => continue,
+            Err(_) => {
+                import_stats.skipped_json_records =
+                    import_stats.skipped_json_records.saturating_add(1);
+                continue;
+            }
         };
 
         let session_id = source_path
@@ -232,20 +279,28 @@ fn load_from_json_values(values: Vec<serde_json::Value>, source_path: &Path) -> 
         }
     }
 
-    finalize_app_data(all_events, all_messages, Vec::new(), DataSourceKind::Json)
+    finalize_app_data(
+        all_events,
+        all_messages,
+        Vec::new(),
+        import_stats,
+        DataSourceKind::Json,
+    )
 }
 
 fn parse_message_payload(
     payload: &str,
     session: &SessionRow,
     source: DataSourceKind,
-) -> Result<Option<ParsedMessage>> {
+) -> Result<ParseMessagePayload> {
     let record: JsonMessageRecord = match serde_json::from_str(payload) {
         Ok(record) => record,
-        Err(_) => return Ok(None),
+        Err(_) => return Ok(ParseMessagePayload::InvalidJson),
     };
 
-    Ok(parse_json_record(record, session, source))
+    Ok(ParseMessagePayload::Parsed(parse_json_record(
+        record, session, source,
+    )))
 }
 
 fn parse_json_record(
@@ -363,6 +418,7 @@ fn finalize_app_data(
     events: Vec<UsageEvent>,
     messages: Vec<MessageRecord>,
     session_records: Vec<SessionRecord>,
+    import_stats: ImportStats,
     source: DataSourceKind,
 ) -> Result<AppData> {
     let mut grouped: BTreeMap<String, Vec<UsageEvent>> = BTreeMap::new();
@@ -391,6 +447,7 @@ fn finalize_app_data(
         events: flattened,
         messages,
         session_records,
+        import_stats,
         sessions,
         source,
     })
@@ -539,11 +596,16 @@ pub fn session_has_messages(db_path: &Path, session_id: &str) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_json_record;
+    use super::{load_from_json_values, load_from_sqlite, parse_json_record};
     use crate::db::models::{
         DataSourceKind, JsonCacheTokensRecord, JsonMessageRecord, JsonPathRecord, JsonTimeRecord,
         JsonTokensRecord,
     };
+    use rusqlite::Connection;
+    use serde_json::json;
+    use std::fs;
+    use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn parses_assistant_json_record() {
@@ -589,5 +651,93 @@ mod tests {
         assert_eq!(event.tokens.total(), 33);
         assert_eq!(event.model_id, "claude-sonnet-4.5");
         assert_eq!(event.provider_id.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn tracks_skipped_json_records_during_import() {
+        let path = Path::new("/tmp/import.json");
+        let data = load_from_json_values(
+            vec![
+                json!({
+                    "role": "assistant",
+                    "providerID": "openai",
+                    "modelID": "gpt-5",
+                    "tokens": { "input": 10, "output": 20 },
+                    "time": { "created": 1_710_000_000_000i64, "completed": 1_710_000_001_000i64 }
+                }),
+                json!(42),
+            ],
+            path,
+        )
+        .unwrap();
+
+        assert_eq!(data.import_stats.skipped_json_records, 1);
+        assert_eq!(data.messages.len(), 1);
+        assert_eq!(data.events.len(), 1);
+    }
+
+    #[test]
+    fn tracks_skipped_sqlite_messages_during_import() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let db_path = std::env::temp_dir().join(format!("oc-stats-load-test-{nonce}.db"));
+        let conn = Connection::open(&db_path).unwrap();
+
+        conn.execute_batch(
+            "
+            CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT, worktree TEXT);
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY,
+                project_id TEXT,
+                parent_id TEXT,
+                title TEXT,
+                time_created INTEGER,
+                time_updated INTEGER,
+                time_archived INTEGER
+            );
+            CREATE TABLE message (
+                session_id TEXT,
+                data TEXT,
+                time_created INTEGER
+            );
+            ",
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO project (id, name, worktree) VALUES (?1, ?2, ?3)",
+            ("proj_1", "demo", "/tmp/demo"),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session (id, project_id, title, time_created, time_updated) VALUES (?1, ?2, ?3, ?4, ?5)",
+            ("ses_1", "proj_1", "Demo", 1_710_000_000_000i64, 1_710_000_001_000i64),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message (session_id, data, time_created) VALUES (?1, ?2, ?3)",
+            (
+                "ses_1",
+                r#"{"role":"assistant","providerID":"openai","modelID":"gpt-5","tokens":{"input":10,"output":20},"time":{"created":1710000000000,"completed":1710000001000}}"#,
+                1_710_000_000_000i64,
+            ),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message (session_id, data, time_created) VALUES (?1, ?2, ?3)",
+            ("ses_1", "not-json", 1_710_000_000_001i64),
+        )
+        .unwrap();
+        drop(conn);
+
+        let data = load_from_sqlite(&db_path).unwrap();
+
+        assert_eq!(data.import_stats.skipped_sqlite_messages, 1);
+        assert_eq!(data.messages.len(), 1);
+        assert_eq!(data.events.len(), 1);
+
+        let _ = fs::remove_file(db_path);
     }
 }

@@ -94,7 +94,7 @@ impl App {
             tokio::spawn(refresh_remote_models(cache_path, sender));
         }
 
-        Self {
+        let mut app = Self {
             data,
             pricing,
             snapshot,
@@ -109,7 +109,20 @@ impl App {
             clipboard_sender,
             clipboard_updates,
             copy_in_progress: false,
+        };
+
+        let notices = [
+            app.data.import_stats.summary(),
+            app.pricing.load_notice.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        if !notices.is_empty() {
+            app.set_persistent_status(notices.join(" | "));
         }
+
+        app
     }
 
     pub fn run(mut self) -> Result<()> {

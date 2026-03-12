@@ -54,12 +54,23 @@ pub struct PricingCatalog {
     pub cache_path: PathBuf,
     pub refresh_needed: bool,
     pub availability: PricingAvailability,
+    pub load_notice: Option<String>,
 }
 
 impl PricingCatalog {
     pub fn load() -> Result<Self> {
         let cache_path = default_cache_path()?;
-        let cached = load_cached_models(&cache_path).unwrap_or_default();
+        let mut warnings = Vec::new();
+        let cached = match load_cached_models(&cache_path) {
+            Ok(cached) => cached,
+            Err(err) => {
+                warnings.push(format!(
+                    "Failed to load cached pricing from {}: {err}",
+                    cache_path.display()
+                ));
+                BTreeMap::new()
+            }
+        };
         let config = opencode_config::load_pricing_overrides()?;
         let refresh_needed = cache_is_stale(&cache_path).unwrap_or(true);
         let availability = if !cached.is_empty() {
@@ -76,6 +87,7 @@ impl PricingCatalog {
             cache_path,
             refresh_needed,
             availability,
+            load_notice: (!warnings.is_empty()).then(|| warnings.join("; ")),
         })
     }
 
@@ -126,6 +138,7 @@ impl PricingCatalog {
             cache_path,
             refresh_needed: false,
             availability: PricingAvailability::Cached,
+            load_notice: None,
         })
     }
 }
@@ -356,10 +369,16 @@ fn decimal_from_json(value: Option<&serde_json::Value>) -> Decimal {
         return Decimal::ZERO;
     };
 
-    if let Some(number) = value.as_f64() {
-        Decimal::try_from(number).unwrap_or(Decimal::ZERO)
+    if let Some(number) = value.as_number() {
+        let raw = number.to_string();
+        raw.parse::<Decimal>()
+            .or_else(|_| Decimal::from_scientific(&raw))
+            .unwrap_or(Decimal::ZERO)
     } else if let Some(number) = value.as_str() {
-        number.parse::<Decimal>().unwrap_or(Decimal::ZERO)
+        number
+            .parse::<Decimal>()
+            .or_else(|_| Decimal::from_scientific(number))
+            .unwrap_or(Decimal::ZERO)
     } else {
         Decimal::ZERO
     }
@@ -488,6 +507,7 @@ mod tests {
             cache_path: PathBuf::from("/tmp/models.json"),
             refresh_needed: false,
             availability: super::PricingAvailability::Cached,
+            load_notice: None,
         };
         let event = UsageEvent {
             session_id: "ses".to_string(),
@@ -509,5 +529,18 @@ mod tests {
         };
 
         assert!(catalog.lookup_for_event(&event).is_none());
+    }
+
+    #[test]
+    fn parses_json_numbers_without_using_f64() {
+        let model = serde_json::from_str::<serde_json::Value>(
+            r#"{"cost":{"input":0.0000003,"output":0.0000004}}"#,
+        )
+        .unwrap();
+
+        let pricing = super::pricing_from_model(&model).unwrap();
+
+        assert_eq!(pricing.input, Decimal::new(3, 7));
+        assert_eq!(pricing.output, Decimal::new(4, 7));
     }
 }

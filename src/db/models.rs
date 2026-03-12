@@ -208,8 +208,41 @@ pub struct AppData {
     pub events: Vec<UsageEvent>,
     pub messages: Vec<MessageRecord>,
     pub session_records: Vec<SessionRecord>,
+    pub import_stats: ImportStats,
     pub sessions: Vec<SessionSummary>,
     pub source: DataSourceKind,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ImportStats {
+    pub skipped_json_records: usize,
+    pub skipped_sqlite_messages: usize,
+}
+
+impl ImportStats {
+    pub fn summary(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        if self.skipped_json_records > 0 {
+            parts.push(format!(
+                "Skipped {} JSON {} during import",
+                self.skipped_json_records,
+                pluralize(self.skipped_json_records, "record", "records")
+            ));
+        }
+        if self.skipped_sqlite_messages > 0 {
+            parts.push(format!(
+                "Skipped {} SQLite {} during import",
+                self.skipped_sqlite_messages,
+                pluralize(self.skipped_sqlite_messages, "message", "messages")
+            ));
+        }
+
+        (!parts.is_empty()).then(|| parts.join("; "))
+    }
+}
+
+fn pluralize<'a>(count: usize, singular: &'a str, plural: &'a str) -> &'a str {
+    if count == 1 { singular } else { plural }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
