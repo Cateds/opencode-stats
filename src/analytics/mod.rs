@@ -106,17 +106,14 @@ pub fn build_snapshot(
             total_cost.add_missing();
         }
     }
-    let session_ids = filtered_events
+    let session_ids = filter_session_ids(data, &filtered_events, &filtered_messages, range, today);
+    let messages = data
+        .messages
         .iter()
-        .map(|event| event.session_id.clone())
-        .chain(
-            filtered_messages
-                .iter()
-                .map(|message| message.session_id.clone()),
-        )
-        .collect::<BTreeSet<_>>();
-    let messages = filtered_messages.len();
-    let prompts = filtered_messages
+        .filter(|message| session_ids.contains(&message.session_id))
+        .count();
+    let prompts = data
+        .messages
         .iter()
         .filter(|message| {
             session_ids.contains(&message.session_id) && message.role.as_deref() == Some("user")
@@ -177,6 +174,37 @@ fn filter_messages(
                 .is_some_and(|date| crate::utils::time::in_range(date, range, today))
         })
         .cloned()
+        .collect()
+}
+
+fn filter_session_ids(
+    data: &AppData,
+    filtered_events: &[UsageEvent],
+    filtered_messages: &[MessageRecord],
+    range: TimeRange,
+    today: NaiveDate,
+) -> BTreeSet<String> {
+    let session_ids = data
+        .session_records
+        .iter()
+        .filter(|session| {
+            crate::utils::time::in_range(session.updated_at.date_naive(), range, today)
+        })
+        .map(|session| session.session_id.clone())
+        .collect::<BTreeSet<_>>();
+
+    if !session_ids.is_empty() {
+        return session_ids;
+    }
+
+    filtered_events
+        .iter()
+        .map(|event| event.session_id.clone())
+        .chain(
+            filtered_messages
+                .iter()
+                .map(|message| message.session_id.clone()),
+        )
         .collect()
 }
 
@@ -300,5 +328,41 @@ mod tests {
             sqlite_snapshot.overview.models_used,
             json_snapshot.overview.models_used
         );
+    }
+
+    #[test]
+    fn overview_prefers_session_records_for_session_count() {
+        let created_at = Local
+            .with_ymd_and_hms(2026, 3, 12, 9, 30, 0)
+            .single()
+            .unwrap();
+        let updated_at = Local
+            .with_ymd_and_hms(2026, 3, 12, 10, 0, 0)
+            .single()
+            .unwrap();
+
+        let data = AppData {
+            events: Vec::new(),
+            messages: Vec::new(),
+            session_records: vec![SessionRecord {
+                session_id: "ses_1".to_string(),
+                created_at,
+                updated_at,
+            }],
+            import_stats: ImportStats::default(),
+            sessions: Vec::new(),
+            source: DataSourceKind::Sqlite,
+        };
+        let pricing = PricingCatalog {
+            models: BTreeMap::new(),
+            cache_path: PathBuf::from("/tmp/models.json"),
+            refresh_needed: false,
+            availability: PricingAvailability::Empty,
+            load_notice: None,
+        };
+
+        let snapshot = build_snapshot(&data, &pricing, TimeRange::All);
+
+        assert_eq!(snapshot.overview.sessions, 1);
     }
 }

@@ -119,7 +119,7 @@ impl App {
         .flatten()
         .collect::<Vec<_>>();
         if !notices.is_empty() {
-            app.set_persistent_status(notices.join(" | "));
+            app.set_status(notices.join(" | "));
         }
 
         app
@@ -319,13 +319,6 @@ impl App {
         });
     }
 
-    fn set_persistent_status(&mut self, text: impl Into<String>) {
-        self.status_message = Some(StatusMessage {
-            text: text.into(),
-            expires_at: None,
-        });
-    }
-
     fn clear_expired_status(&mut self) {
         if self
             .status_message
@@ -346,7 +339,7 @@ impl App {
 
     fn copy_current_page(&mut self) {
         if self.copy_in_progress {
-            self.set_persistent_status("Rendering share card...");
+            self.set_status("Rendering share card...");
             return;
         }
 
@@ -359,7 +352,7 @@ impl App {
         };
 
         self.copy_in_progress = true;
-        self.set_persistent_status("Rendering share card...");
+        self.set_status("Rendering share card...");
 
         let sender = self.clipboard_sender.clone();
         tokio::task::spawn_blocking(move || {
