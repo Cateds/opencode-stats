@@ -108,16 +108,9 @@ pub fn render_overview(
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            compact_fun_comparison(&snapshot.overview.fun_comparison),
+            &snapshot.overview.fun_comparison,
             theme.comparison_style(),
         ))),
         fun,
     );
-}
-
-fn compact_fun_comparison(text: &str) -> String {
-    text.replace("That is ", "Roughly ")
-        .replace(" of text", "")
-        .replace(", or about ", ", or ")
-        .replace(" of nonstop reading", " of nonstop reading")
 }

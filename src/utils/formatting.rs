@@ -47,12 +47,12 @@ pub fn tokens_comparison_text(total_tokens: u64) -> String {
 
     if novels >= 1.0 {
         format!(
-            "That is roughly {:.1} novel(s) of text, or about {:.1} hours of nonstop reading.",
+            "Roughly {:.1} novels of text, or {:.1} hours of nonstop reading.",
             novels, hours_of_reading
         )
     } else {
         format!(
-            "That is about {:.0} printed pages of text, or roughly {:.1} hours of reading.",
+            "About {:.0} printed pages of text, or {:.1} hours of reading.",
             pages, hours_of_reading
         )
     }
