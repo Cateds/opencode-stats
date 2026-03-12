@@ -133,6 +133,7 @@ mod tests {
             cache_path: PathBuf::from("/tmp/models.json"),
             refresh_needed: false,
             availability,
+            load_notice: None,
         }
     }
 
