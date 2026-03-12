@@ -9,12 +9,11 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use crate::cache::models_cache::{PricingCatalog, default_cache_path, refresh_remote_models};
+use crate::cache::models_cache::{PricingCatalog, default_cache_path, refresh_pricing_catalog};
 use crate::db::models::InputOptions;
 use crate::db::queries::load_app_data;
 use crate::ui::app::App;
 use crate::ui::theme::ThemeMode;
-use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -79,14 +78,13 @@ async fn run_cache_command(command: Command) -> Result<()> {
             }
             CacheCommand::Update => {
                 let path = default_cache_path()?;
-                let (sender, mut receiver) = mpsc::unbounded_channel();
-                refresh_remote_models(path.clone(), sender).await;
-                let result = receiver.try_recv();
-                if let Ok(Ok(_)) = result {
-                    println!("Updated {}", path.display());
-                } else {
-                    println!("Failed to update {}", path.display());
-                }
+                let current = PricingCatalog::load().ok();
+                let message = finalize_cache_update(
+                    &path,
+                    current.as_ref(),
+                    refresh_pricing_catalog(path.clone()).await,
+                )?;
+                println!("{message}");
                 Ok(())
             }
             CacheCommand::Clean => {
@@ -99,5 +97,79 @@ async fn run_cache_command(command: Command) -> Result<()> {
                 Ok(())
             }
         },
+    }
+}
+
+fn finalize_cache_update(
+    path: &std::path::Path,
+    current: Option<&PricingCatalog>,
+    result: Result<PricingCatalog>,
+) -> Result<String> {
+    match result {
+        Ok(_) => Ok(format!("Updated {}", path.display())),
+        Err(err) => {
+            let fallback_hint = current
+                .map(PricingCatalog::refresh_failure_hint)
+                .unwrap_or("current pricing fallback status is unknown");
+            Err(err.context(format!(
+                "failed to update {}; {fallback_hint}",
+                path.display()
+            )))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::finalize_cache_update;
+    use crate::cache::models_cache::{PricingAvailability, PricingCatalog};
+    use anyhow::{Result, anyhow};
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    fn test_catalog(availability: PricingAvailability) -> PricingCatalog {
+        PricingCatalog {
+            models: BTreeMap::new(),
+            cache_path: PathBuf::from("/tmp/models.json"),
+            refresh_needed: false,
+            availability,
+        }
+    }
+
+    #[test]
+    fn cache_update_success_keeps_success_message() {
+        let path = Path::new("/tmp/models.json");
+        let result = finalize_cache_update(
+            path,
+            None,
+            Ok::<PricingCatalog, _>(test_catalog(PricingAvailability::Cached)),
+        )
+        .unwrap();
+
+        assert_eq!(result, "Updated /tmp/models.json");
+    }
+
+    #[test]
+    fn cache_update_failure_returns_error_with_fallback_hint() {
+        let path = Path::new("/tmp/models.json");
+        let err = finalize_cache_update(
+            path,
+            Some(&test_catalog(PricingAvailability::OverridesOnly)),
+            Err(anyhow!("network down")),
+        )
+        .unwrap_err();
+
+        let message = format!("{err:#}");
+        assert!(message.contains("failed to update /tmp/models.json"));
+        assert!(message.contains("using local pricing overrides only"));
+    }
+
+    #[test]
+    fn cache_update_failure_without_catalog_still_returns_error() {
+        let path = Path::new("/tmp/models.json");
+        let result: Result<PricingCatalog> = Err(anyhow!("network down"));
+        let err = finalize_cache_update(path, None, result).unwrap_err();
+
+        assert!(format!("{err:#}").contains("current pricing fallback status is unknown"));
     }
 }
