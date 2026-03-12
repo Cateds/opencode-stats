@@ -339,7 +339,7 @@ impl App {
 
     fn copy_current_page(&mut self) {
         if self.copy_in_progress {
-            self.set_status("Rendering share card...");
+            self.set_status("Still rendering share card in background, please wait ...");
             return;
         }
 
@@ -352,7 +352,7 @@ impl App {
         };
 
         self.copy_in_progress = true;
-        self.set_status("Rendering share card...");
+        self.set_status("Rendering share card in background ...");
 
         let sender = self.clipboard_sender.clone();
         tokio::task::spawn_blocking(move || {
