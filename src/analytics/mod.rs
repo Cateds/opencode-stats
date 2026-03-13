@@ -428,8 +428,8 @@ mod tests {
             snapshot.overview.total_cost.known,
             rust_decimal::Decimal::ZERO
         );
-        assert_eq!(snapshot.overview.total_cost.has_known, true);
-        assert_eq!(snapshot.overview.total_cost.missing, false);
+        assert!(snapshot.overview.total_cost.has_known);
+        assert!(!snapshot.overview.total_cost.missing);
         assert_eq!(
             snapshot.overview.total_cost.known,
             PriceSummary::default().known

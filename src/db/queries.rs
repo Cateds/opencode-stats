@@ -129,7 +129,7 @@ struct SqliteMessageLoad {
 }
 
 enum ParseMessagePayload {
-    Parsed(Option<ParsedMessage>),
+    Parsed(Box<Option<ParsedMessage>>),
     InvalidJson,
 }
 
@@ -154,8 +154,11 @@ fn load_messages_sqlite(
         };
 
         match parse_message_payload(&payload, session, DataSourceKind::Sqlite)? {
-            ParseMessagePayload::Parsed(Some(message)) => messages.push(message),
-            ParseMessagePayload::Parsed(None) => {}
+            ParseMessagePayload::Parsed(parsed) => {
+                if let Some(message) = *parsed {
+                    messages.push(message);
+                }
+            }
             ParseMessagePayload::InvalidJson => {
                 skipped_messages = skipped_messages.saturating_add(1);
             }
@@ -298,9 +301,9 @@ fn parse_message_payload(
         Err(_) => return Ok(ParseMessagePayload::InvalidJson),
     };
 
-    Ok(ParseMessagePayload::Parsed(parse_json_record(
+    Ok(ParseMessagePayload::Parsed(Box::new(parse_json_record(
         record, session, source,
-    )))
+    ))))
 }
 
 fn parse_json_record(
@@ -343,9 +346,7 @@ fn parse_json_record(
         });
     }
 
-    let Some(model_id) = model_id else {
-        return None;
-    };
+    let model_id = model_id?;
 
     let tokens = TokenUsage {
         input: record
