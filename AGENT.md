@@ -1,90 +1,113 @@
-# oc-stats Agent Context
+# AGENT.md
 
-## Product Goal
+Context for AI assistants working on oc-stats.
 
-- Build a terminal status dashboard for OpenCode usage, similar to Claude status.
-- Use `ratatui` inline viewport rendering, not the alt screen.
-- Read usage primarily from the OpenCode SQLite database, with JSON export fallback.
-- Show an Overview page and a Models page with cyan/blue themed visuals.
+## Project Overview
 
-## Source Of Truth
+oc-stats is a terminal dashboard for tracking OpenCode usage statistics. It reads usage data from the OpenCode SQLite database (or JSON export) and displays token usage, costs, model breakdown, and activity heatmap in a ratatui-based TUI.
 
-- Product plan: `spec/plan.md`
-- Reference implementation: `ref/ocmonitor-share/`
-- Especially relevant reference files:
-  - `ref/ocmonitor-share/ocmonitor/utils/sqlite_utils.py`
-  - `ref/ocmonitor-share/ocmonitor/utils/data_loader.py`
-  - `ref/ocmonitor-share/ocmonitor/utils/file_utils.py`
-  - `ref/ocmonitor-share/ocmonitor/utils/time_utils.py`
-  - `ref/ocmonitor-share/ocmonitor/services/session_analyzer.py`
-  - `ref/ocmonitor-share/ocmonitor/services/price_fetcher.py`
-  - `ref/ocmonitor-share/ocmonitor/ui/dashboard.py`
-  - `ref/ocmonitor-share/ocmonitor/ui/theme.py`
-  - `ref/ocmonitor-share/ocmonitor/models.json`
+## Build & Test Commands
 
-## Confirmed Data Rules
+```bash
+cargo build          # Build the project
+cargo build --release  # Release build
+cargo test           # Run tests
+cargo clippy         # Lint checks
+cargo fmt            # Format code
+cargo run            # Run the app
+```
 
-- Prefer SQLite; fall back to JSON input when explicitly provided.
-- Default database path:
-  - Windows: `%APPDATA%/opencode/opencode.db`
-  - Linux: `~/.local/share/opencode/opencode.db`
-  - macOS: `~/Library/Application Support/opencode/opencode.db`
-- Only assistant messages count as billable usage.
-- Extract from message JSON:
-  - `modelID` or `model.modelID`
-  - `tokens.input`
-  - `tokens.output`
-  - `tokens.cache.write`
-  - `tokens.cache.read`
-  - `time.created`
-  - `time.completed`
-  - `path.cwd` with `path.root` fallback
-  - `agent`
-  - `finish`
-  - `cost` when present and positive
-- Clamp token counts to non-negative values.
-- Drop zero-token interactions.
-- Drop sessions with no remaining token-bearing assistant interactions.
+## Project Structure
 
-## Pricing Rules
+```plaintext
+src/
+├── main.rs              # Entry point, CLI args
+├── db/
+│   ├── mod.rs
+│   ├── connection.rs    # SQLite connection handling
+│   ├── models.rs        # Data models (UsageEvent, TokenUsage, etc.)
+│   └── queries.rs       # Database queries
+├── cache/
+│   ├── mod.rs
+│   ├── http_client.rs   # HTTP client for remote pricing
+│   ├── models_cache.rs  # Model pricing catalog, remote refresh
+│   └── opencode_config.rs  # OpenCode config parsing
+├── analytics/
+│   ├── mod.rs           # Analytics snapshot builder
+│   ├── daily.rs         # Daily aggregation
+│   ├── weekly.rs        # Weekly aggregation
+│   ├── monthly.rs       # Monthly aggregation
+│   ├── model_stats.rs   # Model/provider statistics
+│   └── heatmap_data.rs  # 365-day heatmap data
+├── ui/
+│   ├── mod.rs
+│   ├── app.rs           # Main app state and event loop
+│   ├── overview.rs      # Overview page rendering
+│   ├── models.rs        # Models/Providers pages
+│   ├── export.rs        # Share card generation
+│   ├── theme.rs         # Dark/light themes
+│   └── widgets/
+│       ├── heatmap.rs   # Activity heatmap widget
+│       ├── linechart.rs # Line chart widget
+│       └── common.rs    # Shared UI utilities
+└── utils/
+    ├── mod.rs
+    ├── formatting.rs    # Number/date formatting
+    ├── pricing.rs       # Price calculation helpers
+    └── time.rs          # Time range handling
+```
 
-- Bundled baseline pricing comes from `ref/ocmonitor-share/ocmonitor/models.json`.
-- Local cache path is `~/.config/oc-stats/models.json`.
-- Cache TTL is 1 hour, based on file modification time.
-- If cache is stale, keep using it and refresh from `https://models.dev/api.json` asynchronously.
-- Remote data only fills missing models or missing fields; it does not replace bundled pricing.
-- Cache pricing fallback rules:
-  - `cacheWrite = input` when absent
-  - `cacheRead = input * 0.1` when absent
-- If stored interaction cost exists and is positive, prefer it over recomputed cost.
+## Key Data Models
 
-## UI Rules
+- `UsageEvent`: A single AI interaction with tokens, model, timestamps
+- `TokenUsage`: input, output, cache_read, cache_write counts
+- `AppData`: All loaded data (events, messages, sessions)
+- `PricingCatalog`: Model pricing with local cache and remote refresh
+- `AnalyticsSnapshot`: Computed statistics for display
 
-- Use inline viewport with a fixed height sized for both pages.
-- No full-screen alt buffer.
-- Overview page includes:
-  - 365-day heatmap
-  - range-sensitive stats
-  - bottom comparison/fun fact
-- Models page includes:
-  - multi-model line chart
-  - range-sensitive model totals and percentages
-- Heatmap is always 365 days and ignores time-range switching.
-- Time range affects summary stats and the line chart only.
-- Primary visual direction is cyan/blue, with both dark and light themes.
+## Data Flow
 
-## Interaction Rules
+1. `db/queries.rs::load_app_data()` loads from SQLite or JSON
+2. `cache/models_cache.rs::PricingCatalog::load()` loads pricing (cached or remote)
+3. `analytics/mod.rs::build_snapshot()` computes statistics
+4. `ui/app.rs::App` runs the TUI event loop
 
-- `Left` / `Right` / `Tab`: switch page
-- `r`: cycle range `All -> 30d -> 7d`
-- `1` / `2` / `3`: direct range selection
-- `Ctrl+S`: copy current page summary to clipboard
-- `q` / `Esc`: quit
+## Key Rules
 
-## Implementation Notes
+### Data Loading
 
-- Keep analytics pure where possible.
-- Keep data loading, pricing, analytics, and UI separated by module.
-- Favor robust parsing over strict schema assumptions for JSON input.
-- Preserve unknown models instead of failing; they should show zero computed cost unless stored cost exists.
-- Optimize for correctness first; cache computed summaries inside app state only if needed.
+- Default database: `%APPDATA%/opencode/opencode.db` (Windows), `~/.local/share/opencode/opencode.db` (Linux), `~/Library/Application Support/opencode/opencode.db` (macOS)
+- Fallback to JSON export with `--json` flag
+- Only assistant messages count toward usage
+
+### Pricing
+
+- Local cache: `~/.config/oc-stats/models.json`
+- Remote source: `https://models.dev/api.json`
+- Cache TTL: 1 hour
+- User overrides in OpenCode config take priority
+- Fallback: `cacheWrite = input`, `cacheRead = input * 0.1`
+- Prefer stored cost from database when available
+
+### UI
+
+- Inline viewport (not alt screen), fixed height ~23 lines
+- Pages: Overview, Models, Providers
+- Time ranges: All, 30d, 7d (cycles with `r` key)
+- Heatmap always shows 365 days
+
+## Keybindings
+
+- `Left/Right/Tab`: Switch pages
+- `r`: Cycle time range
+- `1/2/3`: Direct range selection
+- `Ctrl+S`: Copy summary to clipboard
+- `t`: Toggle theme
+- `q/Esc`: Quit
+
+## Code Style
+
+- No comments unless requested
+- Keep modules separated by concern
+- Pure analytics functions where possible
+- Handle missing data gracefully (use `Option`, defaults)

@@ -1,8 +1,18 @@
 [package]
-name = "oc-stats"
-description = "A terminal dashboard for OpenCode usage statistics"
+name = "opencode-stats"
+description = "A terminal dashboard for OpenCode usage statistics inspired by the /stats command in Claude Code"
 version = "1.3.1"
 edition = "2024"
+authors = ["Cateds <this.id.was.used@outlook.com>"]
+license = "MIT"
+repository = "https://github.com/Cateds/opencode-stats"
+categories = ["command-line-utilities", "visualization"]
+keywords = ["opencode", "cli", "tui", "dashboard", "statistics"]
+readme = "README.md"
+
+[[bin]]
+name = "oc-stats"
+path = "src/main.rs"
 
 [dependencies]
 ab_glyph = "0.2.32"

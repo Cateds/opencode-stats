@@ -1,0 +1,198 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing git tag to release, for example v1.3.1
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN_NAME: oc-stats
+  PACKAGE_NAME: opencode-stats
+
+jobs:
+  build-linux:
+    name: Build Linux (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            artifact_name: oc-stats-x86_64-unknown-linux-gnu
+            archive_name: oc-stats-x86_64-unknown-linux-gnu.tar.gz
+          - target: x86_64-unknown-linux-musl
+            artifact_name: oc-stats-x86_64-unknown-linux-musl
+            archive_name: oc-stats-x86_64-unknown-linux-musl.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Install cargo-zigbuild
+        run: cargo install --locked cargo-zigbuild
+
+      - name: Build binary
+        run: cargo zigbuild --release --locked --target ${{ matrix.target }}
+
+      - name: Package archive
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${BIN_NAME}" "dist/${BIN_NAME}"
+          tar -C dist -czf "dist/${{ matrix.archive_name }}" "${BIN_NAME}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.archive_name }}
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            artifact_name: oc-stats-x86_64-apple-darwin
+            archive_name: oc-stats-x86_64-apple-darwin.tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            artifact_name: oc-stats-aarch64-apple-darwin
+            archive_name: oc-stats-aarch64-apple-darwin.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package archive
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${BIN_NAME}" "dist/${BIN_NAME}"
+          tar -C dist -czf "dist/${{ matrix.archive_name }}" "${BIN_NAME}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.archive_name }}
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build binary
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Package archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/${env:BIN_NAME}.exe" "dist/${env:BIN_NAME}.exe"
+          Compress-Archive -Path "dist/${env:BIN_NAME}.exe" -DestinationPath "dist/oc-stats-x86_64-pc-windows-msvc.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oc-stats-x86_64-pc-windows-msvc
+          path: dist/oc-stats-x86_64-pc-windows-msvc.zip
+          if-no-files-found: error
+
+  publish-crates:
+    name: Publish crate
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Ensure crates.io token is configured
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.CRATES_IO_TOKEN }}" ]; then
+            echo "CRATES_IO_TOKEN secret is not configured."
+            exit 1
+          fi
+
+      - name: Publish to crates.io
+        run: cargo publish --locked --token ${{ secrets.CRATES_IO_TOKEN }}
+
+  release:
+    name: Create GitHub release
+    needs: [build-linux, build-macos, build-windows, publish-crates]
+    if: |
+      always() &&
+      needs.build-linux.result == 'success' &&
+      needs.build-macos.result == 'success' &&
+      needs.build-windows.result == 'success' &&
+      (needs.publish-crates.result == 'success' || needs.publish-crates.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate release notes intro
+        shell: bash
+        run: |
+          cat <<EOF > release-notes.md
+          ## Install
+
+          - From crates.io: `cargo install ${PACKAGE_NAME}`
+          - Installed command: `${BIN_NAME}`
+          - From GitHub: download the archive for your platform from the assets below
+          EOF
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          body_path: release-notes.md
+          generate_release_notes: true
+          files: dist/*
+          fail_on_unmatched_files: true
