@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use colored::Colorize;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use futures::StreamExt;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::widgets::{Block, Padding};
 use ratatui::{DefaultTerminal, Frame, Terminal, TerminalOptions, Viewport, backend::TestBackend};
@@ -22,6 +23,7 @@ use crate::utils::time::TimeRange;
 
 const VIEWPORT_HEIGHT: u16 = 23;
 const STATUS_TTL: Duration = Duration::from_secs(1);
+const TICK_TIME_MS: u16 = 200;
 
 #[derive(Clone, Debug)]
 struct StatusMessage {
@@ -125,12 +127,12 @@ impl App {
         app
     }
 
-    pub fn run(mut self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
         let mut terminal = ratatui::init_with_options(TerminalOptions {
             viewport: Viewport::Inline(VIEWPORT_HEIGHT),
         });
 
-        let app_result = self.run_loop(&mut terminal);
+        let app_result = self.run_loop(&mut terminal).await;
         Self::restore(&mut terminal)?;
         app_result
     }
@@ -144,32 +146,38 @@ impl App {
         Ok(())
     }
 
-    fn run_loop(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+    async fn run_loop(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        let mut event_stream = EventStream::new();
+        let mut tick = tokio::time::interval(Duration::from_millis(TICK_TIME_MS as _));
+
         while !self.should_quit {
             self.clear_expired_status();
-            while let Ok(pricing) = self.pricing_updates.try_recv() {
-                if let Ok(pricing) = pricing {
-                    self.pricing = pricing;
-                    self.recompute();
-                    self.set_status("Pricing cache refreshed from models.dev");
-                } else {
-                    self.set_status(format!(
-                        "Failed to refresh cache from models.dev; {}",
-                        self.pricing.refresh_failure_hint()
-                    ));
-                }
-            }
-            while let Ok(update) = self.clipboard_updates.try_recv() {
-                self.copy_in_progress = false;
-                self.set_status(update.message);
-            }
-
             terminal.draw(|frame| self.render(frame))?;
-            if event::poll(Duration::from_millis(200))?
-                && let Event::Key(key) = event::read()?
-                && key.kind == KeyEventKind::Press
-            {
-                self.handle_key(key);
+
+            tokio::select! {
+                Some(event) = event_stream.next() => {
+                    let event = event?;
+                    if let Event::Key(key) = event && key.kind == KeyEventKind::Press {
+                        self.handle_key(key);
+                    }
+                }
+                Some(pricing) = self.pricing_updates.recv() => {
+                    if let Ok(pricing) = pricing {
+                        self.pricing = pricing;
+                        self.recompute();
+                        self.set_status("Pricing cache refreshed from models.dev");
+                    } else {
+                        self.set_status(format!(
+                            "Failed to refresh cache from models.dev; {}",
+                            self.pricing.refresh_failure_hint()
+                        ));
+                    }
+                }
+                Some(update) = self.clipboard_updates.recv() => {
+                    self.copy_in_progress = false;
+                    self.set_status(update.message);
+                }
+                _ = tick.tick() => {}
             }
         }
         Ok(())

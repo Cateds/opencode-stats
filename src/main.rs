@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
 
     let pricing = PricingCatalog::load().context("failed to load pricing catalog")?;
     let app = App::new(data, pricing, cli.theme);
-    app.run()
+    app.run().await
 }
 
 #[derive(Debug, Parser)]
