@@ -16,6 +16,8 @@ A terminal dashboard for OpenCode usage statistics.
 `oc-stats` reads your local OpenCode SQLite database or JSON export files and displays token usage, cost estimates, model and provider distributions, and a 365-day activity heatmap directly in your terminal. Inspired by Claude Code's `/stats` command, this is an independent implementation focused on local execution, export, and shareability.
 
 > If you're already using OpenCode and want a quick view of your usage, costs, and activity trends, this tool is ready to go.
+>
+> This is an unofficial community project and is not affiliated with, endorsed by, or maintained by the OpenCode team.
 
 ## Features
 
