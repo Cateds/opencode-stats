@@ -3,11 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
+use crate::cache::errors::{Error, Result};
 use crate::cache::http_client;
 use crate::cache::opencode_config;
 use crate::db::models::{TokenUsage, UsageEvent};
@@ -154,16 +154,16 @@ pub fn price_tokens(tokens: &TokenUsage, pricing: &ModelPricing) -> Decimal {
 
 pub fn default_cache_path() -> Result<PathBuf> {
     let Some(cache_dir) = dirs::cache_dir() else {
-        anyhow::bail!("could not determine cache directory");
+        return Err(Error::CacheDirNotFound);
     };
     Ok(cache_dir.join("oc-stats").join("models.json"))
 }
 
 pub async fn refresh_remote_models(
     cache_path: PathBuf,
-    sender: mpsc::UnboundedSender<Result<PricingCatalog>>,
+    sender: mpsc::UnboundedSender<anyhow::Result<PricingCatalog>>,
 ) {
-    let fetch_result = refresh_pricing_catalog(cache_path).await;
+    let fetch_result = refresh_pricing_catalog(cache_path).await.map_err(Into::into);
     let _ = sender.send(fetch_result);
 }
 
@@ -180,14 +180,21 @@ async fn fetch_remote_catalog(cache_path: &Path) -> Result<PricingCatalog> {
 
 fn persist_cached_models(path: &Path, models: &BTreeMap<String, ModelPricing>) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create cache dir {}", parent.display()))?;
+        fs::create_dir_all(parent).map_err(|e| Error::CacheDirCreate {
+            path: parent.to_path_buf(),
+            source: e,
+        })?;
     }
     let temp = path.with_extension("tmp");
-    let bytes = serde_json::to_vec_pretty(models).context("failed to encode cached pricing")?;
-    fs::write(&temp, bytes).with_context(|| format!("failed to write {}", temp.display()))?;
-    fs::rename(&temp, path)
-        .with_context(|| format!("failed to move {} into place", temp.display()))?;
+    let bytes = serde_json::to_vec_pretty(models)?;
+    fs::write(&temp, bytes).map_err(|e| Error::CacheWrite {
+        path: temp.clone(),
+        source: e,
+    })?;
+    fs::rename(&temp, path).map_err(|e| Error::CacheWrite {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
     Ok(())
 }
 
@@ -195,9 +202,11 @@ fn load_cached_models(path: &Path) -> Result<BTreeMap<String, ModelPricing>> {
     if !path.exists() {
         return Ok(BTreeMap::new());
     }
-    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let raw = serde_json::from_slice::<BTreeMap<String, ModelPricing>>(&bytes)
-        .context("failed to parse cached models")?;
+    let bytes = fs::read(path).map_err(|e| Error::CacheRead {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let raw = serde_json::from_slice::<BTreeMap<String, ModelPricing>>(&bytes)?;
     Ok(raw
         .into_iter()
         .map(|(key, value)| (key.to_lowercase(), value.with_fallbacks()))
@@ -208,7 +217,8 @@ fn cache_is_stale(path: &Path) -> Result<bool> {
     if !path.exists() {
         return Ok(true);
     }
-    let metadata = fs::metadata(path)?;
+    let metadata = fs::metadata(path)
+        .map_err(|e| Error::CacheRead { path: path.to_path_buf(), source: e })?;
     let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
     let age = SystemTime::now()
         .duration_since(modified)

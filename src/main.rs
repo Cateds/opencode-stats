@@ -86,7 +86,9 @@ async fn run_cache_command(command: Command) -> Result<()> {
                 let message = finalize_cache_update(
                     &path,
                     current.as_ref(),
-                    refresh_pricing_catalog(path.clone()).await,
+                    refresh_pricing_catalog(path.clone())
+                        .await
+                        .map_err(anyhow::Error::from),
                 )?;
                 println!("{message}");
                 Ok(())

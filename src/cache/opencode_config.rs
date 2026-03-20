@@ -3,10 +3,10 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
 use serde_json::Value;
 
-use crate::cache::models_cache::{ModelPricing, map_models_root_to_local};
+use crate::cache::errors::{Error, Result};
+use crate::cache::models_cache::{map_models_root_to_local, ModelPricing};
 
 pub fn load_pricing_overrides() -> Result<BTreeMap<String, ModelPricing>> {
     let merged = load_merged_config()?;
@@ -44,7 +44,7 @@ fn candidate_config_paths() -> Result<Vec<PathBuf>> {
 }
 
 fn discover_project_config_path() -> Result<Option<PathBuf>> {
-    let mut current = env::current_dir().context("failed to determine current directory")?;
+    let mut current = env::current_dir().map_err(|e| Error::CurrentDir { source: e })?;
 
     loop {
         for name in ["opencode.json", "opencode.jsonc"] {
@@ -70,10 +70,14 @@ fn read_config_if_exists(path: &Path) -> Result<Option<Value>> {
         return Ok(None);
     }
 
-    let contents = fs::read_to_string(path)
-        .with_context(|| format!("failed to read OpenCode config {}", path.display()))?;
-    let value = json5::from_str::<Value>(&contents)
-        .with_context(|| format!("failed to parse OpenCode config {}", path.display()))?;
+    let contents = fs::read_to_string(path).map_err(|e| Error::ConfigRead {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let value = json5::from_str::<Value>(&contents).map_err(|e| Error::ConfigParse {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
     Ok(Some(value))
 }
 
