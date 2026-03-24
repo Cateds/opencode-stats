@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Local};
 use rusqlite::OptionalExtension;
 
-use crate::db::connection::{discover_database_path, open_database};
+use crate::db::connection::{self, discover_database_path, open_database};
+use crate::db::errors::{Error, Result};
 use crate::db::models::{
     AppData, DataSourceKind, ImportStats, InputOptions, JsonMessageRecord, MessageRecord,
     SessionRecord, SessionSummary, TokenUsage, UsageEvent,
@@ -30,14 +30,10 @@ pub fn load_app_data(options: &InputOptions) -> Result<AppData> {
         return load_from_json(json_path);
     }
 
-    let db_path = discover_database_path(options.database_path.as_deref()).with_context(|| {
-        let candidates =
-            crate::db::connection::default_database_candidates(options.database_path.as_deref())
-                .into_iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-        format!("could not find a valid OpenCode database; checked: {candidates}")
+    let db_path = discover_database_path(options.database_path.as_deref()).ok_or_else(|| {
+        Error::database_not_found(connection::default_database_candidates(
+            options.database_path.as_deref(),
+        ))
     })?;
     load_from_sqlite(&db_path)
 }
@@ -45,40 +41,44 @@ pub fn load_app_data(options: &InputOptions) -> Result<AppData> {
 pub fn load_from_sqlite(db_path: &Path) -> Result<AppData> {
     let conn = open_database(db_path)?;
 
-    let mut session_stmt = conn.prepare(
-        "
+    let mut session_stmt = conn
+        .prepare(
+            "
         SELECT s.id, s.parent_id, s.title, s.time_created, s.time_updated, s.time_archived,
                p.name as project_name, p.worktree as project_worktree
         FROM session s
         LEFT JOIN project p ON s.project_id = p.id
         ORDER BY s.time_created DESC
         ",
-    )?;
+        )
+        .map_err(Error::database_query)?;
 
-    let sessions_iter = session_stmt.query_map([], |row| {
-        Ok(SessionRow {
-            id: row.get("id")?,
-            parent_id: row.get("parent_id")?,
-            project_name: row.get("project_name")?,
-            project_worktree: row
-                .get::<_, Option<String>>("project_worktree")?
-                .map(PathBuf::from),
-            title: row.get("title")?,
-            time_created: row
-                .get::<_, Option<i64>>("time_created")?
-                .and_then(timestamp_ms_to_local),
-            time_updated: row
-                .get::<_, Option<i64>>("time_updated")?
-                .and_then(timestamp_ms_to_local),
-            time_archived: row
-                .get::<_, Option<i64>>("time_archived")?
-                .and_then(timestamp_ms_to_local),
+    let sessions_iter = session_stmt
+        .query_map([], |row| {
+            Ok(SessionRow {
+                id: row.get("id")?,
+                parent_id: row.get("parent_id")?,
+                project_name: row.get("project_name")?,
+                project_worktree: row
+                    .get::<_, Option<String>>("project_worktree")?
+                    .map(PathBuf::from),
+                title: row.get("title")?,
+                time_created: row
+                    .get::<_, Option<i64>>("time_created")?
+                    .and_then(timestamp_ms_to_local),
+                time_updated: row
+                    .get::<_, Option<i64>>("time_updated")?
+                    .and_then(timestamp_ms_to_local),
+                time_archived: row
+                    .get::<_, Option<i64>>("time_archived")?
+                    .and_then(timestamp_ms_to_local),
+            })
         })
-    })?;
+        .map_err(Error::database_query)?;
 
     let mut sessions = Vec::new();
     for session in sessions_iter {
-        sessions.push(session?);
+        sessions.push(session.map_err(Error::database_query)?);
     }
 
     let session_lookup = sessions
@@ -137,17 +137,19 @@ fn load_messages_sqlite(
     conn: &rusqlite::Connection,
     sessions: &BTreeMap<String, SessionRow>,
 ) -> Result<SqliteMessageLoad> {
-    let mut stmt = conn.prepare(
-        "SELECT session_id, data FROM message ORDER BY session_id ASC, time_created ASC",
-    )?;
+    let mut stmt = conn
+        .prepare("SELECT session_id, data FROM message ORDER BY session_id ASC, time_created ASC")
+        .map_err(Error::database_query)?;
 
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(Error::database_query)?;
     let mut messages = Vec::new();
     let mut skipped_messages = 0usize;
     for row in rows {
-        let (session_id, payload) = row?;
+        let (session_id, payload) = row.map_err(Error::database_query)?;
         let Some(session) = sessions.get(&session_id) else {
             skipped_messages = skipped_messages.saturating_add(1);
             continue;
@@ -175,16 +177,15 @@ pub fn load_from_json(path: &Path) -> Result<AppData> {
         return load_from_json_directory(path);
     }
 
-    let contents = fs::read_to_string(path)
-        .with_context(|| format!("failed to read JSON file {}", path.display()))?;
+    let contents = fs::read_to_string(path).map_err(|e| Error::json_read(path, e))?;
 
     let json = serde_json::from_str::<serde_json::Value>(&contents)
-        .with_context(|| format!("failed to parse JSON file {}", path.display()))?;
+        .map_err(|e| Error::json_parse(path, e))?;
 
     match json {
         serde_json::Value::Array(items) => load_from_json_values(items, path),
         serde_json::Value::Object(_) => load_from_json_values(vec![json], path),
-        _ => bail!("unsupported JSON input format at {}", path.display()),
+        _ => Err(Error::unsupported_json_format(path)),
     }
 }
 
@@ -194,16 +195,15 @@ fn load_from_json_directory(path: &Path) -> Result<AppData> {
     files.sort();
 
     let mut values = Vec::new();
-    for file in files {
-        let contents = fs::read_to_string(&file)
-            .with_context(|| format!("failed to read JSON file {}", file.display()))?;
+    for file in &files {
+        let contents = fs::read_to_string(file).map_err(|e| Error::json_read(file, e))?;
         let value = serde_json::from_str::<serde_json::Value>(&contents)
-            .with_context(|| format!("failed to parse JSON file {}", file.display()))?;
+            .map_err(|e| Error::json_parse(file, e))?;
 
         match value {
             serde_json::Value::Array(items) => values.extend(items),
             serde_json::Value::Object(_) => values.push(value),
-            _ => bail!("unsupported JSON input format at {}", file.display()),
+            _ => return Err(Error::unsupported_json_format(file)),
         }
     }
 
@@ -211,10 +211,9 @@ fn load_from_json_directory(path: &Path) -> Result<AppData> {
 }
 
 fn collect_json_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in
-        fs::read_dir(path).with_context(|| format!("failed to read dir {}", path.display()))?
-    {
-        let entry = entry?;
+    let entries = fs::read_dir(path).map_err(|e| Error::directory_read(path, e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| Error::directory_read(path, e))?;
         let entry_path = entry.path();
         if entry_path.is_dir() {
             collect_json_files(&entry_path, files)?;
@@ -485,18 +484,20 @@ pub fn load_tool_usage_for_sessions(
         placeholders
     );
 
-    let mut stmt = conn.prepare(&query)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(session_ids.iter()), |row| {
-        Ok((
-            row.get::<_, String>("tool_name")?,
-            row.get::<_, String>("status")?,
-            row.get::<_, i64>("count")?,
-        ))
-    })?;
+    let mut stmt = conn.prepare(&query).map_err(Error::database_query)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(session_ids.iter()), |row| {
+            Ok((
+                row.get::<_, String>("tool_name")?,
+                row.get::<_, String>("status")?,
+                row.get::<_, i64>("count")?,
+            ))
+        })
+        .map_err(Error::database_query)?;
 
     let mut stats = BTreeMap::new();
     for row in rows {
-        let (tool_name, status, count) = row?;
+        let (tool_name, status, count) = row.map_err(Error::database_query)?;
         let count = count.max(0) as u64;
         let entry = stats.entry(tool_name).or_insert((0, 0));
         if status == "completed" {
@@ -520,8 +521,9 @@ pub fn maybe_read_session_title_from_storage(session_id: &str) -> Result<Option<
         return Ok(None);
     }
 
-    for project_dir in fs::read_dir(storage_dir)? {
-        let project_dir = project_dir?;
+    let entries = fs::read_dir(&storage_dir).map_err(|e| Error::directory_read(&storage_dir, e))?;
+    for project_dir in entries {
+        let project_dir = project_dir.map_err(|e| Error::directory_read(&storage_dir, e))?;
         let session_file = project_dir.path().join(format!("{}.json", session_id));
         if !session_file.exists() {
             continue;
@@ -549,8 +551,9 @@ pub fn load_database_path_if_available(custom: Option<&Path>) -> Option<PathBuf>
 #[allow(dead_code)]
 pub fn find_matching_models(db_path: &Path, query: &str) -> Result<Vec<String>> {
     let conn = open_database(db_path)?;
-    let mut stmt = conn.prepare(
-        "
+    let mut stmt = conn
+        .prepare(
+            "
         SELECT DISTINCT COALESCE(
             json_extract(data, '$.modelID'),
             json_extract(data, '$.model.modelID'),
@@ -566,11 +569,14 @@ pub fn find_matching_models(db_path: &Path, query: &str) -> Result<Vec<String>> 
           )) LIKE ?
         ORDER BY model_name
         ",
-    )?;
+        )
+        .map_err(Error::database_query)?;
 
     let pattern = format!("%{}%", query.to_lowercase());
-    let rows = stmt.query_map([pattern], |row| row.get::<_, String>(0))?;
-    Ok(rows.filter_map(Result::ok).collect())
+    let rows = stmt
+        .query_map([pattern], |row| row.get::<_, String>(0))
+        .map_err(Error::database_query)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 #[allow(dead_code)]
@@ -591,7 +597,8 @@ pub fn session_has_messages(db_path: &Path, session_id: &str) -> Result<bool> {
             [session_id],
             |row| row.get(0),
         )
-        .optional()?;
+        .optional()
+        .map_err(Error::database_query)?;
     Ok(count.unwrap_or_default() > 0)
 }
 

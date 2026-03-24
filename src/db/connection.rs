@@ -1,8 +1,9 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
 use rusqlite::Connection;
+
+use crate::db::errors::{Error, Result};
 
 pub fn default_database_candidates(custom_path: Option<&Path>) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
@@ -60,19 +61,20 @@ pub fn discover_database_path(custom_path: Option<&Path>) -> Option<PathBuf> {
 }
 
 pub fn open_database(path: &Path) -> Result<Connection> {
-    Connection::open(path).with_context(|| format!("failed to open database at {}", path.display()))
+    Connection::open(path).map_err(|e| Error::database_open(path, e))
 }
 
 pub fn database_has_expected_tables(path: &Path) -> Result<bool> {
-    let conn = Connection::open(path)
-        .with_context(|| format!("failed to inspect database at {}", path.display()))?;
+    let conn = Connection::open(path).map_err(|e| Error::database_open(path, e))?;
 
     for table in ["session", "message", "project"] {
-        let exists = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-            [table],
-            |row| row.get::<_, i64>(0),
-        )?;
+        let exists = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                [table],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(Error::database_query)?;
         if exists == 0 {
             return Ok(false);
         }
