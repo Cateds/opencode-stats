@@ -5,7 +5,7 @@ use chrono::NaiveDate;
 use crate::cache::models_cache::PricingCatalog;
 use crate::db::models::{MessageRecord, TokenUsage, UsageEvent};
 use crate::utils::formatting::percentage;
-use crate::utils::pricing::PriceSummary;
+use crate::utils::pricing::{PriceSummary, ZeroCostBehavior, update_price_summary};
 use crate::utils::time::TimeRange;
 
 #[derive(Clone, Debug)]
@@ -60,6 +60,7 @@ pub fn build_model_chart(
     pricing: &PricingCatalog,
     _range: TimeRange,
     today: NaiveDate,
+    zero_cost_behavior: ZeroCostBehavior,
 ) -> (Vec<ModelUsageRow>, ModelChartData) {
     let mut model_rows = BTreeMap::<String, UsageAccumulator>::new();
 
@@ -81,7 +82,7 @@ pub fn build_model_chart(
         let entry = model_rows.entry(model).or_default();
         entry.tokens.add_assign(&event.tokens);
         entry.sessions.insert(event.session_id.clone());
-        update_cost(&mut entry.cost, pricing, event);
+        update_price_summary(&mut entry.cost, pricing, event, zero_cost_behavior);
         if let Some(date) = event.activity_date() {
             entry.active_days.insert(date);
             let total = entry.daily_tokens.entry(date).or_default();
@@ -132,6 +133,7 @@ pub fn build_provider_chart(
     pricing: &PricingCatalog,
     _range: TimeRange,
     today: NaiveDate,
+    zero_cost_behavior: ZeroCostBehavior,
 ) -> (Vec<ProviderUsageRow>, ModelChartData) {
     let mut provider_rows = BTreeMap::<String, UsageAccumulator>::new();
 
@@ -157,7 +159,7 @@ pub fn build_provider_chart(
         let entry = provider_rows.entry(provider).or_default();
         entry.tokens.add_assign(&event.tokens);
         entry.sessions.insert(event.session_id.clone());
-        update_cost(&mut entry.cost, pricing, event);
+        update_price_summary(&mut entry.cost, pricing, event, zero_cost_behavior);
         if let Some(date) = event.activity_date() {
             entry.active_days.insert(date);
             let total = entry.daily_tokens.entry(date).or_default();
@@ -390,19 +392,6 @@ struct UsageAccumulator {
     cost: PriceSummary,
     daily_tokens: BTreeMap<NaiveDate, u64>,
     output_rates: Vec<f64>,
-}
-
-fn update_cost(summary: &mut PriceSummary, pricing: &PricingCatalog, event: &UsageEvent) {
-    if let Some(cost) = event.stored_cost_usd {
-        summary.add_known(cost);
-        return;
-    }
-
-    if pricing.has_pricing_for_event(event) {
-        summary.add_known(pricing.cost_for_event(event));
-    } else {
-        summary.add_missing();
-    }
 }
 
 fn median(values: &[f64]) -> f64 {
