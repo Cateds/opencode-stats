@@ -19,6 +19,7 @@ use crate::ui::overview::render_overview;
 use crate::ui::theme::Theme;
 use crate::ui::widgets::common::{CONTENT_WIDTH, left_aligned_content, segment_span};
 use crate::utils::formatting::format_price_summary;
+use crate::utils::pricing::ZeroCostBehavior;
 use crate::utils::time::TimeRange;
 
 const VIEWPORT_HEIGHT: u16 = 23;
@@ -76,6 +77,7 @@ pub struct App {
     pub page: Page,
     pub range: TimeRange,
     pub theme: Theme,
+    pub zero_cost_behavior: ZeroCostBehavior,
     pub should_quit: bool,
     status_message: Option<StatusMessage>,
     pub focused_model_index: usize,
@@ -87,8 +89,13 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(data: AppData, pricing: PricingCatalog, theme: Theme) -> Self {
-        let snapshot = build_snapshot(&data, &pricing, TimeRange::All);
+    pub fn new(
+        data: AppData,
+        pricing: PricingCatalog,
+        theme: Theme,
+        zero_cost_behavior: ZeroCostBehavior,
+    ) -> Self {
+        let snapshot = build_snapshot(&data, &pricing, TimeRange::All, zero_cost_behavior);
         let (sender, receiver) = mpsc::unbounded_channel();
         let (clipboard_sender, clipboard_updates) = mpsc::unbounded_channel();
         if pricing.refresh_needed {
@@ -103,6 +110,7 @@ impl App {
             page: Page::Overview,
             range: TimeRange::All,
             theme,
+            zero_cost_behavior,
             should_quit: false,
             status_message: None,
             focused_model_index: 0,
@@ -184,7 +192,12 @@ impl App {
     }
 
     fn recompute(&mut self) {
-        self.snapshot = build_snapshot(&self.data, &self.pricing, self.range);
+        self.snapshot = build_snapshot(
+            &self.data,
+            &self.pricing,
+            self.range,
+            self.zero_cost_behavior,
+        );
     }
 
     fn render(&self, frame: &mut Frame<'_>) {
