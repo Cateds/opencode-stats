@@ -16,7 +16,7 @@ use crate::db::models::AppData;
 use crate::ui::export::render_share_card;
 use crate::ui::models::{render_models, render_providers};
 use crate::ui::overview::render_overview;
-use crate::ui::theme::Theme;
+use crate::ui::theme::{Theme, ThemeKind};
 use crate::ui::widgets::common::{CONTENT_WIDTH, left_aligned_content, segment_span};
 use crate::utils::formatting::format_price_summary;
 use crate::utils::pricing::ZeroCostBehavior;
@@ -150,7 +150,6 @@ impl App {
     fn restore(terminal: &mut DefaultTerminal) -> Result<()> {
         terminal.clear()?;
         crossterm::terminal::disable_raw_mode()?;
-        print_exit_art();
         Ok(())
     }
 
@@ -461,7 +460,7 @@ fn copy_image_to_clipboard(buffer: ratatui::buffer::Buffer, theme: Theme) -> Res
     Ok(())
 }
 
-fn print_exit_art() {
+pub fn print_exit_art(theme_kind: ThemeKind) {
     type NumStr = [&'static str; 4];
     const O: NumStr = ["    ", "█▀▀█", "█  █", "▀▀▀▀"];
     const C: NumStr = ["    ", "█▀▀▀", "█   ", "▀▀▀▀"];
@@ -469,19 +468,22 @@ fn print_exit_art() {
     const T: NumStr = [" ▄   ", "▀█▀▀ ", " █   ", "  ▀▀ "];
     const A: NumStr = ["     ", "█▀▀█ ", "█  █ ", "▀▀▀ ▀"];
 
-    fn set_theme(str: &str, idx: usize) -> colored::ColoredString {
+    fn set_theme(str: &str, idx: usize, theme: ThemeKind) -> colored::ColoredString {
         let mut str = str.bright_black();
         if idx == 2 {
-            str = str.on_black();
+            str = match theme {
+                ThemeKind::Dark => str.on_black(),
+                ThemeKind::Light => str.on_bright_white(),
+            }
         }
         str
     }
 
     for (idx, (o, c, s, t, a)) in itertools::izip!(O, C, S, T, A).enumerate() {
         eprintln!(
-            "  {o} {c}   {s}{t}{a}{t}{s}",
-            o = set_theme(o, idx),
-            c = set_theme(c, idx),
+            "  {o} {c}  {s}{t}{a}{t}{s}",
+            o = set_theme(o, idx, theme_kind),
+            c = set_theme(c, idx, theme_kind),
         );
     }
 }

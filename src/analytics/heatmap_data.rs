@@ -46,7 +46,7 @@ pub fn build_heatmap_data(events: &[UsageEvent], today: NaiveDate) -> HeatmapDat
                 intensity,
                 is_future: date > end,
             });
-            if date.day() == 1 || (week_index == 0 && date.month() == start.month()) {
+            if date.day() == 1 {
                 let label = date.format("%b").to_string();
                 if month_labels
                     .last()
