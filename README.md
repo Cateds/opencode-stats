@@ -120,12 +120,12 @@ oc-stats --theme dark
 oc-stats --theme light
 ```
 
-### Keep original zero-cost behavior
+### Ignore placeholder zero-cost values
 
-By default, `oc-stats` estimates pricing when OpenCode stores `cost: 0` for a response that still has token usage. Use `--keep-zero` to keep the original behavior and trust stored zero values.
+By default, `oc-stats` keeps stored costs as-is, including `cost: 0`, to preserve compatibility with existing behavior. If your OpenCode setup stores `cost: 0` as a placeholder for responses that still have token usage, use `--ignore-zero` to treat those zero values as missing and estimate the cost instead.
 
 ```bash
-oc-stats --keep-zero
+oc-stats --ignore-zero
 ```
 
 ### Cache management commands
@@ -198,7 +198,7 @@ If local overrides exist in your OpenCode configuration, they take precedence.
 
 When complete pricing information is unavailable, the program falls back to estimated cache read/write costs. If the database already contains actual costs, those values are prioritized.
 
-If the database stores `cost: 0` for a nonzero-token response, `oc-stats` now treats that as missing pricing and estimates the cost unless you pass `--keep-zero`.
+If the database stores `cost: 0` for a nonzero-token response, `oc-stats` keeps that stored zero by default. Pass `--ignore-zero` to estimate the cost instead.
 
 ## Use cases
 

@@ -34,10 +34,10 @@ async fn main() -> Result<()> {
 
     let pricing = PricingCatalog::load().context("failed to load pricing catalog")?;
     let theme = resolve_theme(cli.theme).context("failed to resolve theme")?;
-    let zero_cost_behavior = if cli.keep_zero {
-        ZeroCostBehavior::KeepZero
-    } else {
+    let zero_cost_behavior = if cli.ignore_zero {
         ZeroCostBehavior::EstimateWhenZero
+    } else {
+        ZeroCostBehavior::KeepZero
     };
     let app = App::new(data, pricing, theme, zero_cost_behavior);
     app.run().await
@@ -60,10 +60,10 @@ struct CliArgs {
     theme: Option<ThemeMode>,
 
     #[arg(
-        long = "keep-zero",
-        help = "Keep zero stored costs instead of estimating them"
+        long = "ignore-zero",
+        help = "Treat zero stored costs as missing and estimate them"
     )]
-    keep_zero: bool,
+    ignore_zero: bool,
 }
 
 #[derive(Debug, Subcommand)]

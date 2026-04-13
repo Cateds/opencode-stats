@@ -107,21 +107,6 @@ impl PricingCatalog {
         None
     }
 
-    pub fn cost_for_event(&self, event: &UsageEvent) -> Decimal {
-        if let Some(cost) = event.stored_cost_usd {
-            return cost;
-        }
-
-        let Some(pricing) = self.lookup_for_event(event) else {
-            return Decimal::ZERO;
-        };
-        price_tokens(&event.tokens, pricing)
-    }
-
-    pub fn has_pricing_for_event(&self, event: &UsageEvent) -> bool {
-        self.lookup_for_event(event).is_some()
-    }
-
     pub fn refresh_failure_hint(&self) -> &'static str {
         match self.availability {
             PricingAvailability::Cached => "continuing with cached pricing and local overrides",

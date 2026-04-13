@@ -59,7 +59,7 @@ pub fn build_snapshot(
         .filter(|message| message.model_id.is_some())
         .cloned()
         .collect::<Vec<_>>();
-    let daily = aggregate_daily(&filtered_events, pricing, today);
+    let daily = aggregate_daily(&filtered_events, pricing, today, zero_cost_behavior);
     let weekly = aggregate_weekly(&daily, 0);
     let _monthly = aggregate_monthly(&weekly);
     let (models, chart) = build_model_chart(
@@ -300,13 +300,13 @@ mod tests {
             &sqlite_like,
             &pricing,
             TimeRange::All,
-            ZeroCostBehavior::EstimateWhenZero,
+            ZeroCostBehavior::KeepZero,
         );
         let json_snapshot = build_snapshot(
             &json_like,
             &pricing,
             TimeRange::All,
-            ZeroCostBehavior::EstimateWhenZero,
+            ZeroCostBehavior::KeepZero,
         );
 
         assert_eq!(sqlite_snapshot.overview.sessions, 1);
@@ -365,12 +365,7 @@ mod tests {
             load_notice: None,
         };
 
-        let snapshot = build_snapshot(
-            &data,
-            &pricing,
-            TimeRange::All,
-            ZeroCostBehavior::EstimateWhenZero,
-        );
+        let snapshot = build_snapshot(&data, &pricing, TimeRange::All, ZeroCostBehavior::KeepZero);
 
         assert_eq!(snapshot.overview.sessions, 1);
     }
