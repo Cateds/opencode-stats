@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
@@ -185,7 +186,7 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Generate release notes from history
+      - name: Generate structured release notes
         uses: actions/github-script@v7
         env:
           CURRENT_TAG: ${{ steps.tags.outputs.current }}
@@ -198,29 +199,173 @@ jobs:
             const currentTag = process.env.CURRENT_TAG;
             const previousTag = process.env.PREVIOUS_TAG;
 
-            const params = {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: currentTag,
-              target_commitish: context.sha,
-            };
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
 
-            if (previousTag) {
-              params.previous_tag_name = previousTag;
+            const { data: repoData } = await github.rest.repos.get({ owner, repo });
+            const repoOwner = (repoData.owner?.login || '').toLowerCase();
+
+            const myChanges = [];
+            const communityPRs = new Map();
+            const seenEntries = new Set();
+            const prCache = new Map();
+
+            function parseConventional(subject) {
+              const match = subject.match(/^([a-z]+)(?:\(([^)]+)\))?!?:\s*(.+)$/i);
+              if (!match) {
+                return { type: '', scope: '', title: subject.trim() };
+              }
+              return {
+                type: match[1].toLowerCase(),
+                scope: (match[2] || '').toLowerCase(),
+                title: match[3].trim(),
+              };
             }
 
-            const { data } = await github.rest.repos.generateReleaseNotes(params);
+            function normalizeTitle(raw) {
+              return raw
+                .replace(/^\s*[-*]\s*/, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            }
 
-            const intro = [
+            function shouldSkip(raw, type) {
+              const text = raw.toLowerCase();
+              if (text.startsWith('merge pull request')) return true;
+              if (text.startsWith('merge branch')) return true;
+              if (!type) return false;
+              if (type !== 'chore') return false;
+              return /release|version|bump|publish|发布|版本/.test(text);
+            }
+
+            function extractPrNumber(text) {
+              const match = text.match(/\(#(\d+)\)\s*$/) || text.match(/#(\d+)/);
+              return match ? Number.parseInt(match[1], 10) : null;
+            }
+
+            function isCommunity(pr) {
+              if (!pr?.user?.login) return false;
+              const login = pr.user.login.toLowerCase();
+              if (login === repoOwner) return false;
+              if (login.endsWith('[bot]')) return false;
+              const association = (pr.author_association || '').toUpperCase();
+              return ['CONTRIBUTOR', 'FIRST_TIME_CONTRIBUTOR', 'FIRST_TIMER', 'NONE'].includes(association);
+            }
+
+            async function loadPullByNumber(number) {
+              if (!number) return null;
+              if (prCache.has(number)) return prCache.get(number);
+              try {
+                const { data } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+                prCache.set(number, data);
+                return data;
+              } catch {
+                return null;
+              }
+            }
+
+            async function loadPullByCommit(sha) {
+              try {
+                const { data } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                  owner,
+                  repo,
+                  commit_sha: sha,
+                });
+                if (!Array.isArray(data) || data.length === 0) return null;
+                const pull = data.find((item) => item.merged_at) || data[0];
+                if (pull?.number) prCache.set(pull.number, pull);
+                return pull;
+              } catch {
+                return null;
+              }
+            }
+
+            const commits = [];
+            if (previousTag) {
+              const { data } = await github.rest.repos.compareCommitsWithBasehead({
+                owner,
+                repo,
+                basehead: `${previousTag}...${currentTag}`,
+                per_page: 250,
+              });
+              commits.push(...(data.commits || []));
+            } else {
+              const data = await github.paginate(github.rest.repos.listCommits, {
+                owner,
+                repo,
+                sha: currentTag,
+                per_page: 50,
+              });
+              commits.push(...data);
+            }
+
+            for (const commit of commits) {
+              const subject = (commit.commit?.message || '').split('\n')[0].trim();
+              if (!subject) continue;
+
+              const fromCommit = parseConventional(subject);
+              if (shouldSkip(subject, fromCommit.type)) continue;
+
+              const inlinePrNumber = extractPrNumber(subject);
+              const pull = (await loadPullByNumber(inlinePrNumber)) || (await loadPullByCommit(commit.sha));
+
+              const sourceText = pull?.title || subject;
+              const parsed = parseConventional(sourceText);
+              if (shouldSkip(sourceText, parsed.type || fromCommit.type)) continue;
+
+              const cleanTitle = normalizeTitle(parsed.title || sourceText);
+              if (!cleanTitle) continue;
+
+              const prNumber = pull?.number || inlinePrNumber;
+              const dedupeKey = prNumber ? `pr-${prNumber}` : `commit-${cleanTitle.toLowerCase()}`;
+              if (seenEntries.has(dedupeKey)) continue;
+              seenEntries.add(dedupeKey);
+
+              const itemText = `${cleanTitle}${prNumber ? ` (#${prNumber})` : ''}`;
+
+              if (pull && isCommunity(pull)) {
+                const login = pull.user.login;
+                const list = communityPRs.get(login) || [];
+                list.push(itemText);
+                communityPRs.set(login, list);
+              } else {
+                myChanges.push(`- ${itemText}`);
+              }
+            }
+
+            const body = [
               '## Install',
               '',
               `- From crates.io: \`cargo install ${process.env.PACKAGE_NAME}\``,
               `- Installed command: \`${process.env.BIN_NAME}\``,
               '- From GitHub: download the archive for your platform from the assets below',
               '',
-            ].join('\n');
+            ];
 
-            fs.writeFileSync('release-notes.md', `${intro}${data.body}\n`, 'utf8');
+            if (myChanges.length > 0) {
+              body.push('## Changes', '', ...myChanges, '');
+            } else if (communityPRs.size === 0) {
+              body.push('## Changes', '', '- Maintenance release with no notable user-facing changes.', '');
+            }
+
+            if (communityPRs.size > 0) {
+              const contributorCount = communityPRs.size;
+              body.push(`**Thank you to ${contributorCount} community contributor${contributorCount === 1 ? '' : 's'}:**`);
+              const orderedContributors = [...communityPRs.entries()].sort(([a], [b]) => a.localeCompare(b));
+              for (const [login, items] of orderedContributors) {
+                body.push(`- @${login}:`);
+                for (const item of items) {
+                  body.push(`  - ${item}`);
+                }
+              }
+              body.push('');
+            }
+
+            if (previousTag) {
+              body.push(`**Full Changelog**: https://github.com/${owner}/${repo}/compare/${previousTag}...${currentTag}`);
+            }
+
+            fs.writeFileSync('release-notes.md', `${body.join('\n').trim()}\n`, 'utf8');
 
       - name: Create or update release
         uses: softprops/action-gh-release@v2
