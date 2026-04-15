@@ -290,6 +290,11 @@ impl App {
                 self.recompute();
             }
             KeyCode::Char(value)
+                if key.modifiers.contains(KeyModifiers::CONTROL) && value == 'c' =>
+            {
+                self.should_quit = true;
+            }
+            KeyCode::Char(value)
                 if key.modifiers.contains(KeyModifiers::CONTROL) && value == 's' =>
             {
                 self.copy_current_page();
