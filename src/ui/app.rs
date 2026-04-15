@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use colored::Colorize;
+use colored::{ColoredString, Colorize};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::layout::{Constraint, Layout};
@@ -464,26 +464,67 @@ pub fn print_exit_art(theme_kind: ThemeKind) {
     type NumStr = [&'static str; 4];
     const O: NumStr = ["    ", "█▀▀█", "█  █", "▀▀▀▀"];
     const C: NumStr = ["    ", "█▀▀▀", "█   ", "▀▀▀▀"];
-    const S: NumStr = ["     ", "▄▀▀▀ ", "▀▀▀█ ", "▀▀▀  "];
-    const T: NumStr = [" ▄   ", "▀█▀▀ ", " █   ", "  ▀▀ "];
-    const A: NumStr = ["     ", "█▀▀█ ", "█  █ ", "▀▀▀ ▀"];
+    const S: NumStr = ["    ", "▄▀▀▀", "▀▀▀█", "▀▀▀ "];
+    const T: NumStr = [" ▄  ", "▀█▀▀", " █  ", "  ▀▀"];
+    const A: NumStr = ["    ", "█▀▀█", "█  █", "▀▀▀ ▀"];
 
-    fn set_theme(str: &str, idx: usize, theme: ThemeKind) -> colored::ColoredString {
-        let mut str = str.bright_black();
-        if idx == 2 {
-            str = match theme {
-                ThemeKind::Dark => str.on_black(),
-                ThemeKind::Light => str.on_bright_white(),
+    fn eprint_last_line(str: &str, theme: ThemeKind) {
+        for ch in str.chars() {
+            match ch {
+                ' ' => eprint!(
+                    "{}",
+                    match theme {
+                        ThemeKind::Dark => "▀".bright_black(),
+                        ThemeKind::Light => "▀".bright_white(),
+                    }
+                ),
+                ch => eprint!("{}", ch),
             }
         }
-        str
+    }
+
+    fn line_2_oc(str: &str, theme: ThemeKind) -> ColoredString {
+        match theme {
+            ThemeKind::Dark => str.bright_black().on_black(),
+            ThemeKind::Light => str.bright_black().on_bright_white(),
+        }
+    }
+
+    fn line_2_stats(str: &str, theme: ThemeKind) -> ColoredString {
+        match theme {
+            ThemeKind::Dark => str.on_bright_black(),
+            ThemeKind::Light => str.on_bright_white(),
+        }
     }
 
     for (idx, (o, c, s, t, a)) in itertools::izip!(O, C, S, T, A).enumerate() {
-        eprintln!(
-            "  {o} {c}  {s}{t}{a}{t}{s}",
-            o = set_theme(o, idx, theme_kind),
-            c = set_theme(c, idx, theme_kind),
-        );
+        match idx {
+            0..2 => eprintln!(
+                "  {o} {c}  {s} {t} {a} {t} {s}",
+                o = o.bright_black(),
+                c = c.bright_black(),
+            ),
+            2 => eprintln!(
+                "  {o} {c}  {s} {t} {a} {t} {s}",
+                o = line_2_oc(o, theme_kind),
+                c = line_2_oc(c, theme_kind),
+                s = line_2_stats(s, theme_kind),
+                t = line_2_stats(t, theme_kind),
+                a = line_2_stats(a, theme_kind),
+            ),
+            3 => {
+                eprint!("  {o} {c}  ", o = o.bright_black(), c = c.bright_black());
+                eprint_last_line(s, theme_kind);
+                eprint!(" ");
+                eprint_last_line(t, theme_kind);
+                eprint!(" ");
+                eprint_last_line(a, theme_kind);
+                eprint_last_line(t, theme_kind);
+                eprint!(" ");
+                eprint_last_line(s, theme_kind);
+                eprintln!("");
+            }
+            _ => unreachable!(),
+        }
     }
 }
