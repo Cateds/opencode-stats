@@ -289,14 +289,10 @@ impl App {
                 self.focused_provider_index = 0;
                 self.recompute();
             }
-            KeyCode::Char(value)
-                if key.modifiers.contains(KeyModifiers::CONTROL) && value == 'c' =>
-            {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.should_quit = true;
             }
-            KeyCode::Char(value)
-                if key.modifiers.contains(KeyModifiers::CONTROL) && value == 's' =>
-            {
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.copy_current_page();
             }
             KeyCode::Char(value) => {
