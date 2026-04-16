@@ -91,20 +91,10 @@ impl PricingCatalog {
         })
     }
 
-    pub fn lookup(&self, model_id: &str) -> Option<&ModelPricing> {
-        lookup_model(&self.models, model_id)
-    }
-
     pub fn lookup_for_event(&self, event: &UsageEvent) -> Option<&ModelPricing> {
-        if let Some(key) = event.pricing_model_id() {
-            return lookup_exact_model(&self.models, &key);
-        }
-
-        if event.provider_id.is_none() {
-            return self.lookup(&event.model_id);
-        }
-
-        None
+        event
+            .pricing_model_id()
+            .and_then(|key| self.models.get(&key))
     }
 
     pub fn refresh_failure_hint(&self) -> &'static str {
@@ -196,7 +186,7 @@ fn load_cached_models(path: &Path) -> Result<BTreeMap<String, ModelPricing>> {
     let raw = serde_json::from_slice::<BTreeMap<String, ModelPricing>>(&bytes)?;
     Ok(raw
         .into_iter()
-        .map(|(key, value)| (key.to_lowercase(), value.with_fallbacks()))
+        .map(|(key, value)| (key, value.with_fallbacks()))
         .collect())
 }
 
@@ -224,43 +214,6 @@ fn merge_with_priority(
         merged.insert(key, value.with_fallbacks());
     }
     merged
-}
-
-fn lookup_model<'a>(
-    models: &'a BTreeMap<String, ModelPricing>,
-    model_id: &str,
-) -> Option<&'a ModelPricing> {
-    let lowercase = model_id.to_lowercase();
-    if let Some(value) = models.get(&lowercase) {
-        return Some(value);
-    }
-
-    let normalized = normalize_model_key(model_id);
-    if let Some(value) = models.get(&normalized) {
-        return Some(value);
-    }
-
-    if let Some((_, bare)) = lowercase.split_once('/') {
-        let normalized_bare = normalize_model_key(bare);
-        if let Some(value) = models.get(&normalized_bare) {
-            return Some(value);
-        }
-    }
-
-    None
-}
-
-fn lookup_exact_model<'a>(
-    models: &'a BTreeMap<String, ModelPricing>,
-    model_id: &str,
-) -> Option<&'a ModelPricing> {
-    let lowercase = model_id.to_lowercase();
-    if let Some(value) = models.get(&lowercase) {
-        return Some(value);
-    }
-
-    let normalized = normalize_model_key(model_id);
-    models.get(&normalized)
 }
 
 pub(crate) fn map_models_root_to_local(
@@ -316,12 +269,11 @@ fn collect_provider_models(
             continue;
         };
 
-        let bare = normalize_model_key(model_id);
-        let provider = provider_id.to_lowercase();
+        let provider = provider_id.to_string();
         let key = if provider.is_empty() {
-            bare
+            model_id.to_string()
         } else {
-            format!("{provider}/{bare}")
+            format!("{provider}/{model_id}")
         };
         result.insert(key, pricing);
     }
@@ -383,59 +335,9 @@ fn decimal_from_json(value: Option<&serde_json::Value>) -> Decimal {
     }
 }
 
-pub fn normalize_model_key(model_id: &str) -> String {
-    let mut model = model_id.to_lowercase();
-    if let Some((provider, bare)) = model.split_once('/') {
-        let normalized_bare = normalize_model_key(bare);
-        return format!("{provider}/{normalized_bare}");
-    }
-
-    if model.len() > 9 {
-        let suffix = &model[model.len() - 9..];
-        if suffix.starts_with('-') && suffix[1..].chars().all(|value| value.is_ascii_digit()) {
-            model.truncate(model.len() - 9);
-        }
-    }
-
-    model = regexless_replace_version(&model, "claude-opus-");
-    model = regexless_replace_version(&model, "claude-sonnet-");
-    model = regexless_replace_version(&model, "claude-haiku-");
-    model = regexless_replace_version(&model, "gpt-");
-
-    if let Some(stripped) = model.strip_prefix("kimi-k-")
-        && stripped
-            .chars()
-            .next()
-            .is_some_and(|ch| ch.is_ascii_digit())
-    {
-        model = format!("kimi-k{stripped}");
-    }
-
-    model
-}
-
-fn regexless_replace_version(value: &str, prefix: &str) -> String {
-    if let Some(rest) = value.strip_prefix(prefix) {
-        let segments: Vec<&str> = rest.split('-').collect();
-        if segments.len() >= 2
-            && segments[0].chars().all(|ch| ch.is_ascii_digit())
-            && segments[1].chars().all(|ch| ch.is_ascii_digit())
-        {
-            let merged = format!("{}.{}", segments[0], segments[1]);
-            let suffix = if segments.len() > 2 {
-                format!("-{}", segments[2..].join("-"))
-            } else {
-                String::new()
-            };
-            return format!("{prefix}{merged}{suffix}");
-        }
-    }
-    value.to_string()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{ModelPricing, map_models_root_to_local, normalize_model_key};
+    use super::{ModelPricing, map_models_root_to_local};
     use crate::db::models::{DataSourceKind, TokenUsage, UsageEvent};
     use rust_decimal::Decimal;
     use serde_json::json;
@@ -443,12 +345,51 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn normalizes_date_suffixes() {
-        assert_eq!(
-            normalize_model_key("claude-sonnet-4-5-20250514"),
-            "claude-sonnet-4.5"
+    fn lookup_requires_exact_case() {
+        let mut models = BTreeMap::new();
+        models.insert(
+            "siliconflow-cn/Pro/zai-org/GLM-5".to_string(),
+            ModelPricing {
+                input: Decimal::ONE,
+                output: Decimal::new(2, 0),
+                cache_write: Decimal::ONE,
+                cache_read: Decimal::new(1, 1),
+                context_window: 0,
+                session_quota: Decimal::ZERO,
+            },
         );
-        assert_eq!(normalize_model_key("gpt-5-1"), "gpt-5.1");
+        let catalog = super::PricingCatalog {
+            models,
+            cache_path: PathBuf::from("/tmp/models.json"),
+            refresh_needed: false,
+            availability: super::PricingAvailability::Cached,
+            load_notice: None,
+        };
+        let event = UsageEvent {
+            session_id: "ses".to_string(),
+            parent_session_id: None,
+            session_title: None,
+            session_started_at: None,
+            session_archived_at: None,
+            project_name: None,
+            project_path: None,
+            provider_id: Some("siliconflow-cn".to_string()),
+            model_id: "Pro/zai-org/GLM-5".to_string(),
+            agent: None,
+            finish_reason: None,
+            tokens: TokenUsage::default(),
+            created_at: None,
+            completed_at: None,
+            stored_cost_usd: None,
+            source: DataSourceKind::Json,
+        };
+        let mismatched_case = UsageEvent {
+            model_id: "pro/zai-org/glm-5".to_string(),
+            ..event.clone()
+        };
+
+        assert!(catalog.lookup_for_event(&event).is_some());
+        assert!(catalog.lookup_for_event(&mismatched_case).is_none());
     }
 
     #[test]
@@ -517,6 +458,49 @@ mod tests {
             project_name: None,
             project_path: None,
             provider_id: Some("openai".to_string()),
+            model_id: "claude-sonnet-4.5".to_string(),
+            agent: None,
+            finish_reason: None,
+            tokens: TokenUsage::default(),
+            created_at: None,
+            completed_at: None,
+            stored_cost_usd: None,
+            source: DataSourceKind::Json,
+        };
+
+        assert!(catalog.lookup_for_event(&event).is_none());
+    }
+
+    #[test]
+    fn missing_provider_does_not_fall_back_to_bare_model() {
+        let mut models = BTreeMap::new();
+        models.insert(
+            "claude-sonnet-4.5".to_string(),
+            ModelPricing {
+                input: Decimal::ONE,
+                output: Decimal::new(2, 0),
+                cache_write: Decimal::ONE,
+                cache_read: Decimal::new(1, 1),
+                context_window: 0,
+                session_quota: Decimal::ZERO,
+            },
+        );
+        let catalog = super::PricingCatalog {
+            models,
+            cache_path: PathBuf::from("/tmp/models.json"),
+            refresh_needed: false,
+            availability: super::PricingAvailability::Cached,
+            load_notice: None,
+        };
+        let event = UsageEvent {
+            session_id: "ses".to_string(),
+            parent_session_id: None,
+            session_title: None,
+            session_started_at: None,
+            session_archived_at: None,
+            project_name: None,
+            project_path: None,
+            provider_id: None,
             model_id: "claude-sonnet-4.5".to_string(),
             agent: None,
             finish_reason: None,
