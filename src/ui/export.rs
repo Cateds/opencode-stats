@@ -173,15 +173,15 @@ impl ExportPalette {
 }
 
 fn trimmed_buffer(buffer: &Buffer) -> Buffer {
-    if buffer.area.height <= 1 {
+    if buffer.area.height <= 3 {
         return buffer.clone();
     }
 
-    let trimmed_height = buffer.area.height - 1;
+    let trimmed_height = buffer.area.height - 3;
     let trimmed_width = buffer.area.width;
     let mut content = Vec::with_capacity(trimmed_width as usize * trimmed_height as usize);
 
-    for y in 1..buffer.area.height {
+    for y in 1..buffer.area.height - 2 {
         for x in 0..trimmed_width {
             if let Some(cell) = buffer.cell((x, y)) {
                 content.push(cell.clone());
