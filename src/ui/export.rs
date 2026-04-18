@@ -2,11 +2,12 @@ use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
 use color_eyre::eyre::{Context, Result};
 use image::imageops::{blur, overlay};
 use image::{Rgba, RgbaImage};
-use imageproc::drawing::{draw_filled_circle_mut, draw_filled_rect_mut, draw_text_mut};
+use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
 use imageproc::rect::Rect as ImageRect;
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
 use unicode_width::UnicodeWidthStr;
+use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Transform};
 
 use crate::ui::theme::Theme;
 
@@ -173,16 +174,16 @@ impl ExportPalette {
 }
 
 fn trimmed_buffer(buffer: &Buffer) -> Buffer {
-    if buffer.area.height <= 3 {
+    if buffer.area.height <= 3 || buffer.area.width <= 2 {
         return buffer.clone();
     }
 
     let trimmed_height = buffer.area.height - 3;
-    let trimmed_width = buffer.area.width;
+    let trimmed_width = buffer.area.width - 2;
     let mut content = Vec::with_capacity(trimmed_width as usize * trimmed_height as usize);
 
     for y in 1..buffer.area.height - 2 {
-        for x in 0..trimmed_width {
+        for x in 1..buffer.area.width - 1 {
             if let Some(cell) = buffer.cell((x, y)) {
                 content.push(cell.clone());
             }
@@ -304,44 +305,63 @@ fn draw_filled_rounded_rect(
     radius: u32,
     color: Rgba<u8>,
 ) {
-    let radius = radius.min(width / 2).min(height / 2);
     if width == 0 || height == 0 {
         return;
     }
 
-    if radius == 0 {
-        draw_filled_rect_mut(
-            image,
-            ImageRect::at(x as i32, y as i32).of_size(width, height),
-            color,
-        );
-        return;
+    let shape = rounded_rect_image(width, height, radius, color);
+    overlay(image, &shape, x as i64, y as i64);
+}
+
+fn rounded_rect_image(width: u32, height: u32, radius: u32, color: Rgba<u8>) -> RgbaImage {
+    let mut pixmap = Pixmap::new(width, height).expect("rounded rect size must be non-zero");
+    let radius = radius.min(width / 2).min(height / 2);
+
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
+
+    let path = if radius == 0 {
+        PathBuilder::from_rect(
+            Rect::from_xywh(0.0, 0.0, width as f32, height as f32)
+                .expect("rounded rect bounds must be valid"),
+        )
+    } else {
+        rounded_rect_path(width, height, radius)
+    };
+
+    pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+    pixmap_to_rgba_image(pixmap)
+}
+
+fn rounded_rect_path(width: u32, height: u32, radius: u32) -> tiny_skia::Path {
+    let w = width as f32;
+    let h = height as f32;
+    let r = radius as f32;
+    let k = 0.552_284_8 * r;
+
+    let mut builder = PathBuilder::new();
+    builder.move_to(r, 0.0);
+    builder.line_to(w - r, 0.0);
+    builder.cubic_to(w - r + k, 0.0, w, r - k, w, r);
+    builder.line_to(w, h - r);
+    builder.cubic_to(w, h - r + k, w - r + k, h, w - r, h);
+    builder.line_to(r, h);
+    builder.cubic_to(r - k, h, 0.0, h - r + k, 0.0, h - r);
+    builder.line_to(0.0, r);
+    builder.cubic_to(0.0, r - k, r - k, 0.0, r, 0.0);
+    builder.close();
+    builder.finish().expect("rounded rect path must be valid")
+}
+
+fn pixmap_to_rgba_image(pixmap: Pixmap) -> RgbaImage {
+    let mut data = Vec::with_capacity((pixmap.width() * pixmap.height() * 4) as usize);
+    for pixel in pixmap.pixels() {
+        let color = pixel.demultiply();
+        data.extend_from_slice(&[color.red(), color.green(), color.blue(), color.alpha()]);
     }
 
-    draw_filled_rect_mut(
-        image,
-        ImageRect::at((x + radius) as i32, y as i32).of_size(width - radius * 2, height),
-        color,
-    );
-    draw_filled_rect_mut(
-        image,
-        ImageRect::at(x as i32, (y + radius) as i32).of_size(width, height - radius * 2),
-        color,
-    );
-
-    let radius = radius as i32;
-    let centers = [
-        (x as i32 + radius, y as i32 + radius),
-        (x as i32 + width as i32 - radius - 1, y as i32 + radius),
-        (x as i32 + radius, y as i32 + height as i32 - radius - 1),
-        (
-            x as i32 + width as i32 - radius - 1,
-            y as i32 + height as i32 - radius - 1,
-        ),
-    ];
-    for (cx, cy) in centers {
-        draw_filled_circle_mut(image, (cx, cy), radius, color);
-    }
+    RgbaImage::from_raw(pixmap.width(), pixmap.height(), data)
+        .expect("pixmap size must match raw buffer")
 }
 
 fn color_to_rgba(color: Color, default: Rgba<u8>) -> Rgba<u8> {
