@@ -26,7 +26,7 @@ pub fn render_models(
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
-            Constraint::Length(3),
+            Constraint::Length(5),
             Constraint::Length(1),
         ])
         .areas(area);
@@ -86,38 +86,36 @@ fn render_model_detail(
     row: &ModelUsageRow,
     theme: &Theme,
 ) {
-    let [row_one, row_two, row_three] = Layout::default()
+    let [row_one, row_two, row_three, row_four, row_five] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
         ])
         .areas(area);
-    let [top_left, top_mid, top_right] = Layout::default()
+    let [one_left, one_right] = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
-        ])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .areas(row_one);
-    let [bottom_left, bottom_mid, bottom_right] = Layout::default()
+    let [two_left, two_right] = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
-        ])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .areas(row_two);
-    let [third_left, third_mid, third_right] = Layout::default()
+    let [three_left, three_right] = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
-        ])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .areas(row_three);
+    let [four_left, four_right] = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .areas(row_four);
+    let [five_left, five_right] = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .areas(row_five);
 
     frame.render_widget(
         Paragraph::new(metric_line(
@@ -125,15 +123,11 @@ fn render_model_detail(
             format_tokens(row.total_tokens),
             theme,
         )),
-        top_left,
+        one_left,
     );
     frame.render_widget(
         Paragraph::new(metric_line("Cost ", format_price_summary(&row.cost), theme)),
-        top_mid,
-    );
-    frame.render_widget(
-        Paragraph::new(metric_line("Sessions ", row.sessions.to_string(), theme)),
-        top_right,
+        one_right,
     );
     frame.render_widget(
         Paragraph::new(metric_line(
@@ -141,7 +135,11 @@ fn render_model_detail(
             format_tokens(row.input_tokens),
             theme,
         )),
-        bottom_left,
+        two_left,
+    );
+    frame.render_widget(
+        Paragraph::new(metric_line("Sessions ", row.sessions.to_string(), theme)),
+        two_right,
     );
     frame.render_widget(
         Paragraph::new(metric_line(
@@ -149,19 +147,23 @@ fn render_model_detail(
             format_tokens(row.output_tokens),
             theme,
         )),
-        bottom_mid,
+        three_left,
     );
     frame.render_widget(
         Paragraph::new(metric_line("Messages ", row.messages.to_string(), theme)),
-        bottom_right,
+        three_right,
+    );
+    frame.render_widget(
+        Paragraph::new(metric_line(
+            "Cache ",
+            format_tokens(row.cache_tokens),
+            theme,
+        )),
+        four_left,
     );
     frame.render_widget(
         Paragraph::new(metric_line("Prompts ", row.prompts.to_string(), theme)),
-        third_left,
-    );
-    frame.render_widget(
-        Paragraph::new(metric_line("Days ", row.active_days.to_string(), theme)),
-        third_mid,
+        four_right,
     );
     frame.render_widget(
         Paragraph::new(metric_line(
@@ -169,7 +171,11 @@ fn render_model_detail(
             format!("{:.2} tok/s", row.p50_output_tokens_per_second),
             theme,
         )),
-        third_right,
+        five_left,
+    );
+    frame.render_widget(
+        Paragraph::new(metric_line("Days ", row.active_days.to_string(), theme)),
+        five_right,
     );
 }
 
@@ -188,7 +194,7 @@ pub fn render_providers(
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
-            Constraint::Length(3),
+            Constraint::Length(5),
             Constraint::Length(1),
         ])
         .areas(area);
@@ -248,38 +254,36 @@ fn render_provider_detail(
     row: &ProviderUsageRow,
     theme: &Theme,
 ) {
-    let [row_one, row_two, row_three] = Layout::default()
+    let [row_one, row_two, row_three, row_four, row_five] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
         ])
         .areas(area);
-    let [top_left, top_mid, top_right] = Layout::default()
+    let [one_left, one_right] = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
-        ])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .areas(row_one);
-    let [bottom_left, bottom_mid, bottom_right] = Layout::default()
+    let [two_left, two_right] = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
-        ])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .areas(row_two);
-    let [third_left, third_mid, third_right] = Layout::default()
+    let [three_left, three_right] = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
-        ])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .areas(row_three);
+    let [four_left, four_right] = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .areas(row_four);
+    let [five_left, five_right] = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .areas(row_five);
 
     frame.render_widget(
         Paragraph::new(metric_line(
@@ -287,15 +291,11 @@ fn render_provider_detail(
             format_tokens(row.total_tokens),
             theme,
         )),
-        top_left,
+        one_left,
     );
     frame.render_widget(
         Paragraph::new(metric_line("Cost ", format_price_summary(&row.cost), theme)),
-        top_mid,
-    );
-    frame.render_widget(
-        Paragraph::new(metric_line("Sessions ", row.sessions.to_string(), theme)),
-        top_right,
+        one_right,
     );
     frame.render_widget(
         Paragraph::new(metric_line(
@@ -303,7 +303,11 @@ fn render_provider_detail(
             format_tokens(row.input_tokens),
             theme,
         )),
-        bottom_left,
+        two_left,
+    );
+    frame.render_widget(
+        Paragraph::new(metric_line("Sessions ", row.sessions.to_string(), theme)),
+        two_right,
     );
     frame.render_widget(
         Paragraph::new(metric_line(
@@ -311,19 +315,23 @@ fn render_provider_detail(
             format_tokens(row.output_tokens),
             theme,
         )),
-        bottom_mid,
+        three_left,
     );
     frame.render_widget(
         Paragraph::new(metric_line("Messages ", row.messages.to_string(), theme)),
-        bottom_right,
+        three_right,
+    );
+    frame.render_widget(
+        Paragraph::new(metric_line(
+            "Cache ",
+            format_tokens(row.cache_tokens),
+            theme,
+        )),
+        four_left,
     );
     frame.render_widget(
         Paragraph::new(metric_line("Prompts ", row.prompts.to_string(), theme)),
-        third_left,
-    );
-    frame.render_widget(
-        Paragraph::new(metric_line("Days ", row.active_days.to_string(), theme)),
-        third_mid,
+        four_right,
     );
     frame.render_widget(
         Paragraph::new(metric_line(
@@ -331,6 +339,10 @@ fn render_provider_detail(
             format!("{:.2} tok/s", row.p50_output_tokens_per_second),
             theme,
         )),
-        third_right,
+        five_left,
+    );
+    frame.render_widget(
+        Paragraph::new(metric_line("Days ", row.active_days.to_string(), theme)),
+        five_right,
     );
 }
