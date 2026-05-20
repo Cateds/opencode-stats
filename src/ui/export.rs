@@ -6,8 +6,8 @@ use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
 use imageproc::rect::Rect as ImageRect;
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
-use unicode_width::UnicodeWidthStr;
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Transform};
+use unicode_width::UnicodeWidthStr;
 
 use crate::ui::theme::Theme;
 
@@ -329,7 +329,13 @@ fn rounded_rect_image(width: u32, height: u32, radius: u32, color: Rgba<u8>) -> 
         rounded_rect_path(width, height, radius)
     };
 
-    pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+    pixmap.fill_path(
+        &path,
+        &paint,
+        FillRule::Winding,
+        Transform::identity(),
+        None,
+    );
     pixmap_to_rgba_image(pixmap)
 }
 
