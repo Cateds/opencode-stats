@@ -237,7 +237,7 @@ fn render_provider_detail(
 
     frame.render_widget(
         Paragraph::new(metric_line(
-            "Total tokens:",
+            "Total tokens: ",
             format_tokens(row.total_tokens),
             theme,
         )),
