@@ -70,13 +70,15 @@ fn focus_header_line(
             Style::default().fg(theme.series_color(focused_model_index)),
         ),
         Span::styled(format!("  ({:.2}%)", row.percentage), theme.muted_style()),
-        Span::styled("  |  ", theme.muted_style()),
+        Span::styled(" | ", theme.muted_style()),
         Span::styled(
             format!("{}/{}", focused_model_index.min(total - 1) + 1, total),
             theme.muted_style(),
         ),
-        Span::styled("  |  ", theme.muted_style()),
-        Span::styled("j/k ↑/↓ cycle", theme.muted_style()),
+        Span::styled(" | ", theme.muted_style()),
+        Span::styled("j/k ↑/↓", theme.muted_style()),
+        Span::styled(" | ", theme.muted_style()),
+        Span::styled("f find", theme.muted_style()),
     ])
 }
 
@@ -217,13 +219,15 @@ fn focus_provider_line(
             Style::default().fg(theme.series_color(focused_provider_index)),
         ),
         Span::styled(format!("  ({:.2}%)", row.percentage), theme.muted_style()),
-        Span::styled("  |  ", theme.muted_style()),
+        Span::styled(" | ", theme.muted_style()),
         Span::styled(
             format!("{}/{}", focused_provider_index.min(total - 1) + 1, total),
             theme.muted_style(),
         ),
-        Span::styled("  |  ", theme.muted_style()),
-        Span::styled("j/k ↑/↓ cycle", theme.muted_style()),
+        Span::styled(" | ", theme.muted_style()),
+        Span::styled("j/k ↑/↓", theme.muted_style()),
+        Span::styled(" | ", theme.muted_style()),
+        Span::styled("f find", theme.muted_style()),
     ])
 }
 
