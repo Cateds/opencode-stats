@@ -1,8 +1,8 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use unicode_width::UnicodeWidthStr;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use unicode_width::UnicodeWidthStr;
 
 use crate::analytics::AnalyticsSnapshot;
 use crate::analytics::model_stats::{ModelUsageRow, ProviderUsageRow, chart_with_focus};
@@ -439,11 +439,9 @@ fn render_search_overlay<T: SearchItem>(
         items.len(),
     );
     let hint_width = UnicodeWidthStr::width(hint.as_str()) as u16;
-    let [input_area, hint_area] = Layout::horizontal([
-        Constraint::Fill(1),
-        Constraint::Length(hint_width),
-    ])
-    .areas::<2>(header_area);
+    let [input_area, hint_area] =
+        Layout::horizontal([Constraint::Fill(1), Constraint::Length(hint_width)])
+            .areas::<2>(header_area);
 
     let input_prefix = "  ● ";
     let input_line = Line::from(vec![
@@ -470,7 +468,7 @@ fn render_search_overlay<T: SearchItem>(
         };
 
         let [indent, text_area, sb_area] = Layout::horizontal([
-            Constraint::Length(2),
+            Constraint::Length(3),
             Constraint::Fill(1),
             Constraint::Length(1),
         ])
@@ -491,7 +489,7 @@ fn render_search_overlay<T: SearchItem>(
             frame.render_widget(
                 Paragraph::new(Span::styled("▌", indicator_style)),
                 Rect {
-                    x: indent.x + 1,
+                    x: indent.x + 2,
                     y: indent.y,
                     width: 1,
                     height: 1,
@@ -525,10 +523,7 @@ fn render_search_overlay<T: SearchItem>(
                     ));
                 }
             }
-            spans.push(Span::styled(
-                format!(" ({:.2}%)", pct),
-                theme.muted_style(),
-            ));
+            spans.push(Span::styled(format!(" ({:.2}%)", pct), theme.muted_style()));
 
             let text_rect = Rect {
                 x: text_area.x + 1,
@@ -542,8 +537,7 @@ fn render_search_overlay<T: SearchItem>(
         if filtered_total > 5 {
             let thumb_size = (5.0 * 5.0 / filtered_total as f64).max(1.0) as usize;
             let thumb_start = ((search.scroll_offset as f64 / (filtered_total - 5) as f64)
-                * (5.0 - thumb_size as f64))
-                as usize;
+                * (5.0 - thumb_size as f64)) as usize;
             let ch = if line >= thumb_start && line < thumb_start + thumb_size {
                 "┃"
             } else {
