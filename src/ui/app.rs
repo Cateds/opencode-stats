@@ -412,35 +412,32 @@ impl App {
     }
 
     fn enter_search(&mut self) {
-        let total = match self.page {
-            Page::Models => self.snapshot.models.len(),
-            Page::Providers => self.snapshot.providers.len(),
+        let (ids, focused) = match self.page {
+            Page::Models => (
+                self.snapshot
+                    .models
+                    .iter()
+                    .map(|m| m.model_id.clone())
+                    .collect::<Vec<_>>(),
+                self.focused_model_index,
+            ),
+            Page::Providers => (
+                self.snapshot
+                    .providers
+                    .iter()
+                    .map(|p| p.provider_id.clone())
+                    .collect::<Vec<_>>(),
+                self.focused_provider_index,
+            ),
             _ => return,
         };
-        self.search = Some(SearchState::new(total));
+        self.search = Some(SearchState::new(ids, focused));
     }
 
     fn update_search_filter(&mut self) {
-        let search = match self.search.as_mut() {
-            Some(s) => s,
-            None => return,
-        };
-        let ids: Vec<String> = match self.page {
-            Page::Models => self
-                .snapshot
-                .models
-                .iter()
-                .map(|m| m.model_id.clone())
-                .collect(),
-            Page::Providers => self
-                .snapshot
-                .providers
-                .iter()
-                .map(|p| p.provider_id.clone())
-                .collect(),
-            _ => return,
-        };
-        search.update_filter(&ids);
+        if let Some(search) = self.search.as_mut() {
+            search.update_filter();
+        }
     }
 
     fn set_status(&mut self, text: impl Into<String>) {

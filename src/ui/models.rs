@@ -15,23 +15,28 @@ use crate::utils::time::TimeRange;
 #[derive(Clone, Debug)]
 pub struct SearchState {
     pub query: String,
+    pub ids: Vec<String>,
     pub filtered_indices: Vec<usize>,
     pub selected: usize,
     pub scroll_offset: usize,
 }
 
 impl SearchState {
-    pub fn new(total: usize) -> Self {
+    pub fn new(ids: Vec<String>, focused_index: usize) -> Self {
+        let total = ids.len();
+        let selected = focused_index.min(total.saturating_sub(1));
+        let scroll_offset = if selected > 4 { selected - 4 } else { 0 };
         Self {
             query: String::new(),
+            ids,
             filtered_indices: (0..total).collect(),
-            selected: 0,
-            scroll_offset: 0,
+            selected,
+            scroll_offset,
         }
     }
 
-    pub fn update_filter(&mut self, ids: &[String]) {
-        self.filtered_indices = filter_indices(&self.query, ids);
+    pub fn update_filter(&mut self) {
+        self.filtered_indices = filter_indices(&self.query, &self.ids);
         self.selected = self
             .selected
             .min(self.filtered_indices.len().saturating_sub(1));
@@ -503,7 +508,7 @@ fn render_search_overlay<T: SearchItem>(
                 let lower_id = id.to_lowercase();
                 let lower_query = search.query.to_lowercase();
                 if let Some(pos) = lower_id.find(&lower_query) {
-                    let end = pos + search.query.len();
+                    let end = pos + lower_query.len();
                     spans.push(Span::styled(
                         id[..pos].to_string(),
                         Style::default().fg(theme.foreground),
