@@ -40,9 +40,10 @@ impl SearchState {
         self.selected = self
             .selected
             .min(self.filtered_indices.len().saturating_sub(1));
+        let filtered_total = self.filtered_indices.len();
         self.scroll_offset = self
             .scroll_offset
-            .min(self.filtered_indices.len().saturating_sub(1));
+            .min(filtered_total.saturating_sub(5));
         if self.scroll_offset > self.selected {
             self.scroll_offset = self.selected;
         }
