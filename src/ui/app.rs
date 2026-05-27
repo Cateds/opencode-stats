@@ -316,16 +316,27 @@ impl App {
                     self.update_search_filter();
                 }
                 KeyCode::Down if !search.filtered_indices.is_empty() => {
-                    search.selected = (search.selected + 1)
-                        .min(search.filtered_indices.len().saturating_sub(1));
-                    if search.selected >= search.scroll_offset + 5 {
-                        search.scroll_offset = search.selected.saturating_sub(4);
+                    let total = search.filtered_indices.len();
+                    if search.selected + 1 >= total {
+                        search.selected = 0;
+                        search.scroll_offset = 0;
+                    } else {
+                        search.selected += 1;
+                        if search.selected >= search.scroll_offset + 5 {
+                            search.scroll_offset = search.selected.saturating_sub(4);
+                        }
                     }
                 }
                 KeyCode::Up => {
-                    search.selected = search.selected.saturating_sub(1);
-                    if search.selected < search.scroll_offset {
-                        search.scroll_offset = search.selected;
+                    if search.selected == 0 {
+                        let total = search.filtered_indices.len();
+                        search.selected = total.saturating_sub(1);
+                        search.scroll_offset = search.selected.saturating_sub(4);
+                    } else {
+                        search.selected -= 1;
+                        if search.selected < search.scroll_offset {
+                            search.scroll_offset = search.selected;
+                        }
                     }
                 }
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
