@@ -1,8 +1,10 @@
+use nucleo_matcher::Matcher;
+use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::analytics::AnalyticsSnapshot;
 use crate::analytics::model_stats::{ModelUsageRow, ProviderUsageRow, chart_with_focus};
@@ -36,32 +38,127 @@ impl SearchState {
     }
 
     pub fn update_filter(&mut self) {
+        let has_query = !self.query.trim().is_empty();
         self.filtered_indices = filter_indices(&self.query, &self.ids);
-        self.selected = self
-            .selected
-            .min(self.filtered_indices.len().saturating_sub(1));
-        let filtered_total = self.filtered_indices.len();
-        self.scroll_offset = self
-            .scroll_offset
-            .min(filtered_total.saturating_sub(5));
-        if self.scroll_offset > self.selected {
-            self.scroll_offset = self.selected;
+        if has_query {
+            self.selected = 0;
+            self.scroll_offset = 0;
+        } else {
+            self.selected = self
+                .selected
+                .min(self.filtered_indices.len().saturating_sub(1));
+            let filtered_total = self.filtered_indices.len();
+            self.scroll_offset = self
+                .scroll_offset
+                .min(filtered_total.saturating_sub(5));
+            if self.scroll_offset > self.selected {
+                self.scroll_offset = self.selected;
+            }
         }
     }
 }
 
 fn filter_indices(query: &str, items: &[String]) -> Vec<usize> {
-    if query.is_empty() {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
         return (0..items.len()).collect();
     }
-    let lower = query.to_lowercase();
-    items
-        .iter()
-        .enumerate()
-        .filter(|(_, name)| name.to_lowercase().contains(&lower))
-        .map(|(i, _)| i)
-        .collect()
+
+    let mut matcher = Matcher::default();
+    let terms: Vec<&str> = trimmed.split_whitespace().collect();
+    let mut results: Vec<(usize, u32)> = Vec::new();
+
+    for (i, item) in items.iter().enumerate() {
+        let mut char_buf = Vec::new();
+        let haystack = nucleo_matcher::Utf32Str::new(item, &mut char_buf);
+        let mut all_matched = true;
+        let mut total_score = 0u32;
+
+        for term in &terms {
+            let pattern = Pattern::parse(term, CaseMatching::Ignore, Normalization::Smart);
+            if let Some(score) = pattern.score(haystack, &mut matcher) {
+                total_score += score;
+            } else {
+                all_matched = false;
+                break;
+            }
+        }
+
+        if all_matched {
+            results.push((i, total_score));
+        }
+    }
+
+    results.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    results.into_iter().map(|(i, _)| i).collect()
 }
+
+fn fuzzy_match_positions(query: &str, text: &str) -> Vec<usize> {
+    let mut matcher = Matcher::default();
+    let terms: Vec<&str> = query.split_whitespace().collect();
+    let mut char_buf = Vec::new();
+    let haystack = nucleo_matcher::Utf32Str::new(text, &mut char_buf);
+    let mut positions: Vec<usize> = Vec::new();
+
+    for term in &terms {
+        let pattern = Pattern::parse(term, CaseMatching::Ignore, Normalization::Smart);
+        let mut indices_buf = Vec::new();
+        pattern.indices(haystack, &mut matcher, &mut indices_buf);
+        if !indices_buf.is_empty() {
+            for idx in indices_buf {
+                positions.push(idx as usize);
+            }
+        }
+    }
+
+    positions.sort_unstable();
+    positions.dedup();
+    positions
+}
+
+fn merge_to_ranges(positions: &[usize]) -> Vec<(usize, usize)> {
+    if positions.is_empty() {
+        return vec![];
+    }
+    let mut ranges = Vec::new();
+    let mut start = positions[0];
+    let mut end = start + 1;
+    for &pos in &positions[1..] {
+        if pos == end {
+            end = pos + 1;
+        } else {
+            ranges.push((start, end));
+            start = pos;
+            end = pos + 1;
+        }
+    }
+    ranges.push((start, end));
+    ranges
+}
+
+fn truncate_query_left(query: &str, max_width: u16) -> String {
+    let full_w = UnicodeWidthStr::width(query) as u16;
+    if full_w <= max_width {
+        return query.to_string();
+    }
+    let avail = max_width.saturating_sub(1);
+    let chars: Vec<char> = query.chars().collect();
+    let mut w = 0u16;
+    let mut i = chars.len();
+    while i > 0 {
+        i -= 1;
+        w += UnicodeWidthChar::width(chars[i]).unwrap_or(0) as u16;
+        if w > avail {
+            i += 1;
+            break;
+        }
+    }
+    let mut result = String::from("…");
+    result.extend(&chars[i..]);
+    result
+}
+
+pub const MAX_QUERY_LEN: usize = 256;
 
 pub fn render_models(
     frame: &mut ratatui::Frame<'_>,
@@ -445,12 +542,15 @@ fn render_search_overlay<T: SearchItem>(
             .areas::<2>(header_area);
 
     let input_prefix = "  ● ";
+    let prefix_w = UnicodeWidthStr::width(input_prefix) as u16;
+    let max_input_w = input_area
+        .width
+        .saturating_sub(prefix_w)
+        .saturating_sub(1);
+    let display_query = truncate_query_left(&search.query, max_input_w);
     let input_line = Line::from(vec![
         Span::styled(input_prefix, theme.muted_style()),
-        Span::styled(
-            format!("{}_", search.query),
-            Style::default().fg(theme.foreground),
-        ),
+        Span::styled(format!("{}_", display_query), Style::default().fg(theme.foreground)),
     ]);
     frame.render_widget(Paragraph::new(input_line), input_area);
     frame.render_widget(
@@ -498,30 +598,26 @@ fn render_search_overlay<T: SearchItem>(
             );
 
             let mut spans: Vec<Span> = Vec::new();
-            if search.query.is_empty() {
-                spans.push(Span::styled(
-                    id.to_string(),
-                    Style::default().fg(theme.foreground),
-                ));
+            let fg = Style::default().fg(theme.foreground);
+            if search.query.trim().is_empty() {
+                spans.push(Span::styled(id.to_string(), fg));
             } else {
-                let lower_id = id.to_lowercase();
-                let lower_query = search.query.to_lowercase();
-                if let Some(pos) = lower_id.find(&lower_query) {
-                    let end = pos + lower_query.len();
-                    spans.push(Span::styled(
-                        id[..pos].to_string(),
-                        Style::default().fg(theme.foreground),
-                    ));
-                    spans.push(Span::styled(&id[pos..end], theme.accent_style()));
-                    spans.push(Span::styled(
-                        id[end..].to_string(),
-                        Style::default().fg(theme.foreground),
-                    ));
+                let positions = fuzzy_match_positions(&search.query, id);
+                if positions.is_empty() {
+                    spans.push(Span::styled(id.to_string(), fg));
                 } else {
-                    spans.push(Span::styled(
-                        id.to_string(),
-                        Style::default().fg(theme.foreground),
-                    ));
+                    let ranges = merge_to_ranges(&positions);
+                    let mut cursor = 0usize;
+                    for (start, end) in &ranges {
+                        if *start > cursor {
+                            spans.push(Span::styled(id[cursor..*start].to_string(), fg));
+                        }
+                        spans.push(Span::styled(&id[*start..*end], theme.accent_style()));
+                        cursor = *end;
+                    }
+                    if cursor < id.len() {
+                        spans.push(Span::styled(id[cursor..].to_string(), fg));
+                    }
                 }
             }
             spans.push(Span::styled(format!(" ({:.2}%)", pct), theme.muted_style()));

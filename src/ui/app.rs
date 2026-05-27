@@ -17,6 +17,7 @@ use crate::cache::models_cache::{PricingCatalog, refresh_remote_models};
 use crate::db::models::AppData;
 use crate::ui::export::render_share_card;
 use crate::ui::models::{SearchState, render_models, render_providers};
+use crate::ui::models::MAX_QUERY_LEN;
 use crate::ui::overview::render_overview;
 use crate::ui::theme::{Theme, ThemeKind};
 use crate::ui::widgets::common::{CONTENT_WIDTH, left_aligned_content, segment_span};
@@ -342,8 +343,14 @@ impl App {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.should_quit = true;
                 }
+                KeyCode::Char(' ') if search.query.len() < MAX_QUERY_LEN => {
+                    search.query.push(' ');
+                    self.update_search_filter();
+                }
                 KeyCode::Char(value)
-                    if !value.is_control() && value.is_ascii_graphic() =>
+                    if !value.is_control()
+                        && value.is_ascii_graphic()
+                        && search.query.len() < MAX_QUERY_LEN =>
                 {
                     search.query.push(value);
                     self.update_search_filter();
