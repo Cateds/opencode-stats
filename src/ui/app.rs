@@ -16,7 +16,7 @@ use crate::analytics::{AnalyticsSnapshot, build_snapshot};
 use crate::cache::models_cache::{PricingCatalog, refresh_remote_models};
 use crate::db::models::AppData;
 use crate::ui::export::render_share_card;
-use crate::ui::models::{render_models, render_providers};
+use crate::ui::models::{SearchState, render_models, render_providers};
 use crate::ui::overview::render_overview;
 use crate::ui::theme::{Theme, ThemeKind};
 use crate::ui::widgets::common::{CONTENT_WIDTH, left_aligned_content, segment_span};
@@ -84,6 +84,7 @@ pub struct App {
     status_message: Option<StatusMessage>,
     pub focused_model_index: usize,
     pub focused_provider_index: usize,
+    pub search: Option<SearchState>,
     pricing_updates: mpsc::UnboundedReceiver<Result<PricingCatalog>>,
     clipboard_sender: mpsc::UnboundedSender<ClipboardUpdate>,
     clipboard_updates: mpsc::UnboundedReceiver<ClipboardUpdate>,
@@ -117,6 +118,7 @@ impl App {
             status_message: None,
             focused_model_index: 0,
             focused_provider_index: 0,
+            search: None,
             pricing_updates: receiver,
             clipboard_sender,
             clipboard_updates,
@@ -249,6 +251,7 @@ impl App {
                 &self.snapshot,
                 self.range,
                 self.focused_model_index,
+                self.search.as_ref(),
                 theme,
             ),
             Page::Providers => render_providers(
@@ -257,6 +260,7 @@ impl App {
                 &self.snapshot,
                 self.range,
                 self.focused_provider_index,
+                self.search.as_ref(),
                 theme,
             ),
         }
@@ -294,16 +298,67 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
+        if let Some(ref mut search) = self.search {
+            match key.code {
+                KeyCode::Esc => self.search = None,
+                KeyCode::Enter => {
+                    if let Some(&real_idx) = search.filtered_indices.get(search.selected) {
+                        match self.page {
+                            Page::Models => self.focused_model_index = real_idx,
+                            Page::Providers => self.focused_provider_index = real_idx,
+                            _ => {}
+                        }
+                    }
+                    self.search = None;
+                }
+                KeyCode::Backspace if !search.query.is_empty() => {
+                    search.query.pop();
+                    self.update_search_filter();
+                }
+                KeyCode::Down if !search.filtered_indices.is_empty() => {
+                    search.selected = (search.selected + 1)
+                        .min(search.filtered_indices.len().saturating_sub(1));
+                    if search.selected >= search.scroll_offset + 5 {
+                        search.scroll_offset = search.selected.saturating_sub(4);
+                    }
+                }
+                KeyCode::Up => {
+                    search.selected = search.selected.saturating_sub(1);
+                    if search.selected < search.scroll_offset {
+                        search.scroll_offset = search.selected;
+                    }
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.should_quit = true;
+                }
+                KeyCode::Char(value)
+                    if !value.is_control() && value.is_ascii_graphic() =>
+                {
+                    search.query.push(value);
+                    self.update_search_filter();
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
-            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => self.page = self.page.next(),
-            KeyCode::Left | KeyCode::Char('h') => self.page = self.page.previous(),
+            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                self.search = None;
+                self.page = self.page.next();
+            }
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.search = None;
+                self.page = self.page.previous();
+            }
             KeyCode::Down | KeyCode::Char('j') => self.advance_focused_model(1),
             KeyCode::Up | KeyCode::Char('k') => self.advance_focused_model(-1),
             KeyCode::Char('r') => {
                 self.range = self.range.cycle();
                 self.focused_model_index = 0;
                 self.focused_provider_index = 0;
+                self.search = None;
                 self.recompute();
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -312,11 +367,17 @@ impl App {
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.copy_current_page();
             }
+            KeyCode::Char('f')
+                if matches!(self.page, Page::Models | Page::Providers) =>
+            {
+                self.enter_search();
+            }
             KeyCode::Char(value) => {
                 if let Some(range) = TimeRange::from_shortcut(value) {
                     self.range = range;
                     self.focused_model_index = 0;
                     self.focused_provider_index = 0;
+                    self.search = None;
                     self.recompute();
                 }
             }
@@ -348,6 +409,38 @@ impl App {
             }
             Page::Overview => {}
         }
+    }
+
+    fn enter_search(&mut self) {
+        let total = match self.page {
+            Page::Models => self.snapshot.models.len(),
+            Page::Providers => self.snapshot.providers.len(),
+            _ => return,
+        };
+        self.search = Some(SearchState::new(total));
+    }
+
+    fn update_search_filter(&mut self) {
+        let search = match self.search.as_mut() {
+            Some(s) => s,
+            None => return,
+        };
+        let ids: Vec<String> = match self.page {
+            Page::Models => self
+                .snapshot
+                .models
+                .iter()
+                .map(|m| m.model_id.clone())
+                .collect(),
+            Page::Providers => self
+                .snapshot
+                .providers
+                .iter()
+                .map(|p| p.provider_id.clone())
+                .collect(),
+            _ => return,
+        };
+        search.update_filter(&ids);
     }
 
     fn set_status(&mut self, text: impl Into<String>) {
