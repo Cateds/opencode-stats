@@ -332,8 +332,7 @@ fn format_label(date: &NaiveDate) -> String {
 }
 
 fn format_label_all(date: &NaiveDate) -> String {
-    let inner = format!("{}-{}-{}", date.year() % 100, date.month(), date.day());
-    format!("{:^8}", inner)
+    format!("{:02}-{:02}-{:02}", date.year() % 100, date.month(), date.day())
 }
 
 fn build_x_labels(days: &[NaiveDate], range: TimeRange) -> Vec<String> {
