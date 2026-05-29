@@ -331,6 +331,11 @@ fn format_label(date: &NaiveDate) -> String {
     format!("{:>2}-{:<2}", date.month(), date.day())
 }
 
+fn format_label_all(date: &NaiveDate) -> String {
+    let inner = format!("{}-{}-{}", date.year() % 100, date.month(), date.day());
+    format!("{:^8}", inner)
+}
+
 fn build_x_labels(days: &[NaiveDate], range: TimeRange) -> Vec<String> {
     if days.is_empty() {
         return vec!["Start".to_string(), "Mid".to_string(), "End".to_string()];
@@ -351,12 +356,15 @@ fn build_x_labels(days: &[NaiveDate], range: TimeRange) -> Vec<String> {
             labels
         }
         TimeRange::All => {
-            let mid = days.len() / 2;
-            let last = days.len() - 1;
+            let n = days.len();
+            let step = (n - 1) / 4;
+            let last = n - 1;
             vec![
-                format_label(&days[0]),
-                format_label(&days[mid]),
-                format_label(&days[last]),
+                format_label_all(&days[0]),
+                format_label_all(&days[step]),
+                format_label_all(&days[step * 2]),
+                format_label_all(&days[step * 3]),
+                format_label_all(&days[last]),
             ]
         }
     }
