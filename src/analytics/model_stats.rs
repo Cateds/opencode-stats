@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 
 use crate::cache::models_cache::PricingCatalog;
 use crate::db::models::{MessageRecord, TokenUsage, UsageEvent};
@@ -60,7 +60,7 @@ pub fn build_model_chart(
     events: &[UsageEvent],
     messages: &[MessageRecord],
     pricing: &PricingCatalog,
-    _range: TimeRange,
+    range: TimeRange,
     today: NaiveDate,
     zero_cost_behavior: ZeroCostBehavior,
 ) -> (Vec<ModelUsageRow>, ModelChartData) {
@@ -126,7 +126,7 @@ pub fn build_model_chart(
         .iter()
         .map(|row| row.model_id.clone())
         .collect::<Vec<_>>();
-    let chart = build_chart_for_models(events, &top_models, today, |event| event.model_id.clone());
+    let chart = build_chart_for_models(events, &top_models, range, today, |event| event.model_id.clone());
     (rows, chart)
 }
 
@@ -134,7 +134,7 @@ pub fn build_provider_chart(
     events: &[UsageEvent],
     messages: &[MessageRecord],
     pricing: &PricingCatalog,
-    _range: TimeRange,
+    range: TimeRange,
     today: NaiveDate,
     zero_cost_behavior: ZeroCostBehavior,
 ) -> (Vec<ProviderUsageRow>, ModelChartData) {
@@ -204,7 +204,7 @@ pub fn build_provider_chart(
         .iter()
         .map(|row| row.provider_id.clone())
         .collect::<Vec<_>>();
-    let chart = build_chart_for_models(events, &providers, today, |event| {
+    let chart = build_chart_for_models(events, &providers, range, today, |event| {
         event
             .provider_id
             .clone()
@@ -235,6 +235,7 @@ pub fn chart_with_focus(chart: &ModelChartData, focused_model_id: Option<&str>) 
 fn build_chart_for_models<F>(
     events: &[UsageEvent],
     top_models: &[String],
+    range: TimeRange,
     today: NaiveDate,
     key_fn: F,
 ) -> ModelChartData
@@ -310,7 +311,7 @@ where
     }
 
     let last_index = (days.len().saturating_sub(1)) as f64;
-    let x_labels = build_x_labels(&days);
+    let x_labels = build_x_labels(&days, range);
     let (y_ticks, y_bounds) = nice_integer_ticks(y_max.max(1.0), 4);
     let y_labels = y_ticks
         .iter()
@@ -326,19 +327,36 @@ where
     }
 }
 
-fn build_x_labels(days: &[NaiveDate]) -> Vec<String> {
-    match days {
-        [] => vec!["Start".to_string(), "Mid".to_string(), "End".to_string()],
-        [day] => {
-            let label = day.format("%b %d").to_string();
-            vec![label.clone(), label.clone(), label]
+fn format_label(date: &NaiveDate) -> String {
+    format!("{:>2}-{:<2}", date.month(), date.day())
+}
+
+fn build_x_labels(days: &[NaiveDate], range: TimeRange) -> Vec<String> {
+    if days.is_empty() {
+        return vec!["Start".to_string(), "Mid".to_string(), "End".to_string()];
+    }
+    if days.len() == 1 {
+        let label = format_label(&days[0]);
+        return vec![label.clone(), label.clone(), label];
+    }
+
+    match range {
+        TimeRange::Last7Days => days.iter().map(format_label).collect(),
+        TimeRange::Last30Days => {
+            let step = 5;
+            let last = days.len() - 1;
+            let mut labels: Vec<String> =
+                (0..last).step_by(step).map(|i| format_label(&days[i])).collect();
+            labels.push(format_label(&days[last]));
+            labels
         }
-        _ => {
-            let middle_index = days.len() / 2;
+        TimeRange::All => {
+            let mid = days.len() / 2;
+            let last = days.len() - 1;
             vec![
-                days[0].format("%b %d").to_string(),
-                days[middle_index].format("%b %d").to_string(),
-                days[days.len() - 1].format("%b %d").to_string(),
+                format_label(&days[0]),
+                format_label(&days[mid]),
+                format_label(&days[last]),
             ]
         }
     }
@@ -416,6 +434,7 @@ fn median(values: &[f64]) -> f64 {
 mod tests {
     use super::build_chart_for_models;
     use crate::db::models::{DataSourceKind, TokenUsage, UsageEvent};
+    use crate::utils::time::TimeRange;
     use chrono::{Local, NaiveDate, TimeZone};
 
     #[test]
@@ -450,12 +469,13 @@ mod tests {
                 source: DataSourceKind::Json,
             }],
             &["gpt-5".to_string()],
+            TimeRange::All,
             day,
             |event| event.model_id.clone(),
         );
 
         assert_eq!(chart.x_labels.len(), 3);
-        assert_eq!(chart.x_labels[0], "Mar 12");
-        assert_eq!(chart.x_labels[2], "Mar 12");
+        assert_eq!(chart.x_labels[0], " 3-12");
+        assert_eq!(chart.x_labels[2], " 3-12");
     }
 }
