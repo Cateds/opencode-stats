@@ -120,13 +120,15 @@ pub fn build_model_chart(
         })
         .collect::<Vec<_>>();
 
-    rows.sort_by(|left, right| right.total_tokens.cmp(&left.total_tokens));
+    rows.sort_by_key(|right| std::cmp::Reverse(right.total_tokens));
 
     let top_models = rows
         .iter()
         .map(|row| row.model_id.clone())
         .collect::<Vec<_>>();
-    let chart = build_chart_for_models(events, &top_models, range, today, |event| event.model_id.clone());
+    let chart = build_chart_for_models(events, &top_models, range, today, |event| {
+        event.model_id.clone()
+    });
     (rows, chart)
 }
 
@@ -198,7 +200,7 @@ pub fn build_provider_chart(
         })
         .collect::<Vec<_>>();
 
-    rows.sort_by(|left, right| right.total_tokens.cmp(&left.total_tokens));
+    rows.sort_by_key(|right| std::cmp::Reverse(right.total_tokens));
 
     let providers = rows
         .iter()
@@ -332,7 +334,12 @@ fn format_label(date: &NaiveDate) -> String {
 }
 
 fn format_label_all(date: &NaiveDate) -> String {
-    format!("{} {} {:<2}", date.year() % 100, date.format("%b"), date.day())
+    format!(
+        "{} {} {:<2}",
+        date.year() % 100,
+        date.format("%b"),
+        date.day()
+    )
 }
 
 fn build_x_labels(days: &[NaiveDate], range: TimeRange) -> Vec<String> {
@@ -349,8 +356,10 @@ fn build_x_labels(days: &[NaiveDate], range: TimeRange) -> Vec<String> {
         TimeRange::Last30Days => {
             let step = 5;
             let last = days.len() - 1;
-            let mut labels: Vec<String> =
-                (0..last).step_by(step).map(|i| format_label(&days[i])).collect();
+            let mut labels: Vec<String> = (0..last)
+                .step_by(step)
+                .map(|i| format_label(&days[i]))
+                .collect();
             labels.push(format_label(&days[last]));
             labels
         }

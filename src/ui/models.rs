@@ -27,7 +27,7 @@ impl SearchState {
     pub fn new(ids: Vec<String>, focused_index: usize) -> Self {
         let total = ids.len();
         let selected = focused_index.min(total.saturating_sub(1));
-        let scroll_offset = if selected > 4 { selected - 4 } else { 0 };
+        let scroll_offset = selected.saturating_sub(4);
         Self {
             query: String::new(),
             ids,
@@ -48,9 +48,7 @@ impl SearchState {
                 .selected
                 .min(self.filtered_indices.len().saturating_sub(1));
             let filtered_total = self.filtered_indices.len();
-            self.scroll_offset = self
-                .scroll_offset
-                .min(filtered_total.saturating_sub(5));
+            self.scroll_offset = self.scroll_offset.min(filtered_total.saturating_sub(5));
             if self.scroll_offset > self.selected {
                 self.scroll_offset = self.selected;
             }
@@ -543,14 +541,14 @@ fn render_search_overlay<T: SearchItem>(
 
     let input_prefix = "  ● ";
     let prefix_w = UnicodeWidthStr::width(input_prefix) as u16;
-    let max_input_w = input_area
-        .width
-        .saturating_sub(prefix_w)
-        .saturating_sub(1);
+    let max_input_w = input_area.width.saturating_sub(prefix_w).saturating_sub(1);
     let display_query = truncate_query_left(&search.query, max_input_w);
     let input_line = Line::from(vec![
         Span::styled(input_prefix, theme.muted_style()),
-        Span::styled(format!("{}_", display_query), Style::default().fg(theme.foreground)),
+        Span::styled(
+            format!("{}_", display_query),
+            Style::default().fg(theme.foreground),
+        ),
     ]);
     frame.render_widget(Paragraph::new(input_line), input_area);
     frame.render_widget(
