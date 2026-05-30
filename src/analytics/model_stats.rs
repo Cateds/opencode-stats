@@ -328,11 +328,11 @@ where
 }
 
 fn format_label(date: &NaiveDate) -> String {
-    format!("{:>2}-{:<2}", date.month(), date.day())
+    format!("{} {:<2}", date.format("%b"), date.day())
 }
 
 fn format_label_all(date: &NaiveDate) -> String {
-    format!("{:02}-{:02}-{:02}", date.year() % 100, date.month(), date.day())
+    format!("{} {} {:<2}", date.year() % 100, date.format("%b"), date.day())
 }
 
 fn build_x_labels(days: &[NaiveDate], range: TimeRange) -> Vec<String> {
@@ -482,7 +482,7 @@ mod tests {
         );
 
         assert_eq!(chart.x_labels.len(), 3);
-        assert_eq!(chart.x_labels[0], " 3-12");
-        assert_eq!(chart.x_labels[2], " 3-12");
+        assert_eq!(chart.x_labels[0], "Mar 12");
+        assert_eq!(chart.x_labels[2], "Mar 12");
     }
 }
