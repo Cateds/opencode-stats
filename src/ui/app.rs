@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 use crate::analytics::{AnalyticsSnapshot, build_snapshot};
 use crate::cache::models_cache::{PricingCatalog, refresh_remote_models};
 use crate::db::models::AppData;
+use crate::ui::agents::render_agents;
 use crate::ui::export::render_share_card;
 use crate::ui::models::MAX_QUERY_LEN;
 use crate::ui::models::{SearchState, render_models, render_providers};
@@ -53,6 +54,7 @@ pub enum Page {
     Overview,
     Models,
     Providers,
+    Agents,
 }
 
 impl Page {
@@ -60,15 +62,17 @@ impl Page {
         match self {
             Self::Overview => Self::Models,
             Self::Models => Self::Providers,
-            Self::Providers => Self::Overview,
+            Self::Providers => Self::Agents,
+            Self::Agents => Self::Overview,
         }
     }
 
     pub fn previous(self) -> Self {
         match self {
-            Self::Overview => Self::Providers,
+            Self::Overview => Self::Agents,
             Self::Models => Self::Overview,
             Self::Providers => Self::Models,
+            Self::Agents => Self::Providers,
         }
     }
 }
@@ -85,6 +89,7 @@ pub struct App {
     status_message: Option<StatusMessage>,
     pub focused_model_index: usize,
     pub focused_provider_index: usize,
+    pub focused_agent_index: usize,
     pub search: Option<SearchState>,
     pricing_updates: mpsc::UnboundedReceiver<Result<PricingCatalog>>,
     clipboard_sender: mpsc::UnboundedSender<ClipboardUpdate>,
@@ -119,6 +124,7 @@ impl App {
             status_message: None,
             focused_model_index: 0,
             focused_provider_index: 0,
+            focused_agent_index: 0,
             search: None,
             pricing_updates: receiver,
             clipboard_sender,
@@ -264,6 +270,15 @@ impl App {
                 self.search.as_ref(),
                 theme,
             ),
+            Page::Agents => render_agents(
+                frame,
+                body,
+                &self.snapshot,
+                self.range,
+                self.focused_agent_index,
+                self.search.as_ref(),
+                theme,
+            ),
         }
 
         self.render_footer(frame, footer, theme);
@@ -275,6 +290,7 @@ impl App {
             segment_span("Overview", self.page == Page::Overview, theme),
             segment_span("Models", self.page == Page::Models, theme),
             segment_span("Providers", self.page == Page::Providers, theme),
+            segment_span("Agents", self.page == Page::Agents, theme),
             ratatui::text::Span::raw("    "),
             segment_span(" All ", self.range == TimeRange::All, theme),
             segment_span("7 Days", self.range == TimeRange::Last7Days, theme),
@@ -307,6 +323,7 @@ impl App {
                         match self.page {
                             Page::Models => self.focused_model_index = real_idx,
                             Page::Providers => self.focused_provider_index = real_idx,
+                            Page::Agents => self.focused_agent_index = real_idx,
                             _ => {}
                         }
                     }
@@ -376,6 +393,7 @@ impl App {
                 self.range = self.range.cycle();
                 self.focused_model_index = 0;
                 self.focused_provider_index = 0;
+                self.focused_agent_index = 0;
                 self.search = None;
                 self.recompute();
             }
@@ -385,7 +403,9 @@ impl App {
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.copy_current_page();
             }
-            KeyCode::Char('f') if matches!(self.page, Page::Models | Page::Providers) => {
+            KeyCode::Char('f')
+                if matches!(self.page, Page::Models | Page::Providers | Page::Agents) =>
+            {
                 self.enter_search();
             }
             KeyCode::Char(value) => {
@@ -393,6 +413,7 @@ impl App {
                     self.range = range;
                     self.focused_model_index = 0;
                     self.focused_provider_index = 0;
+                    self.focused_agent_index = 0;
                     self.search = None;
                     self.recompute();
                 }
@@ -423,6 +444,16 @@ impl App {
                 let next = (current + delta).rem_euclid(total) as usize;
                 self.focused_provider_index = next;
             }
+            Page::Agents => {
+                if self.snapshot.agents.is_empty() {
+                    return;
+                }
+
+                let current = self.focused_agent_index as isize;
+                let total = self.snapshot.agents.len() as isize;
+                let next = (current + delta).rem_euclid(total) as usize;
+                self.focused_agent_index = next;
+            }
             Page::Overview => {}
         }
     }
@@ -444,6 +475,14 @@ impl App {
                     .map(|p| p.provider_id.clone())
                     .collect::<Vec<_>>(),
                 self.focused_provider_index,
+            ),
+            Page::Agents => (
+                self.snapshot
+                    .agents
+                    .iter()
+                    .map(|a| a.agent_id.clone())
+                    .collect::<Vec<_>>(),
+                self.focused_agent_index,
             ),
             _ => return,
         };
@@ -553,6 +592,19 @@ impl App {
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
+            Page::Agents => {
+                let mut lines = Vec::new();
+                for row in self.snapshot.agents.iter().take(8) {
+                    lines.push(format!(
+                        "{}: {} tokens ({:.2}%)",
+                        row.agent_id, row.total_tokens, row.percentage
+                    ));
+                    for m in &row.model_breakdown {
+                        lines.push(format!("  {}: {} tokens", m.model_id, m.tokens));
+                    }
+                }
+                lines.join("\n")
+            }
         }
     }
 }
