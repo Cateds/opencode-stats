@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Local, NaiveDate};
@@ -116,7 +116,7 @@ pub struct SessionSummary {
     pub title: String,
     pub project_name: String,
     pub project_path: Option<PathBuf>,
-    pub events: Vec<UsageEvent>,
+    pub start_time: Option<DateTime<Local>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -127,7 +127,7 @@ pub struct SessionRecord {
 }
 
 impl SessionSummary {
-    pub fn from_events(session_id: String, events: Vec<UsageEvent>) -> Option<Self> {
+    pub fn from_events(session_id: String, events: &[UsageEvent]) -> Option<Self> {
         let first = events.first()?;
         let title = first
             .session_title
@@ -141,7 +141,7 @@ impl SessionSummary {
             });
 
         let mut project_counts: BTreeMap<String, usize> = BTreeMap::new();
-        for event in &events {
+        for event in events {
             if let Some(project) = event.project_basename() {
                 *project_counts.entry(project).or_default() += 1;
             }
@@ -159,50 +159,12 @@ impl SessionSummary {
             title,
             project_name,
             project_path: first.project_path.clone(),
-            events,
+            start_time: events.iter().filter_map(|event| event.created_at).min(),
         })
     }
 
-    #[allow(dead_code)]
-    pub fn total_tokens(&self) -> TokenUsage {
-        let mut usage = TokenUsage::default();
-        for event in &self.events {
-            usage.add_assign(&event.tokens);
-        }
-        usage
-    }
-
-    #[allow(dead_code)]
-    pub fn models_used(&self) -> BTreeSet<String> {
-        self.events
-            .iter()
-            .map(|event| event.model_id.clone())
-            .collect()
-    }
-
-    #[allow(dead_code)]
-    pub fn interaction_count(&self) -> usize {
-        self.events.len()
-    }
-
     pub fn start_time(&self) -> Option<DateTime<Local>> {
-        self.events
-            .iter()
-            .filter_map(|event| event.created_at)
-            .min()
-    }
-
-    #[allow(dead_code)]
-    pub fn end_time(&self) -> Option<DateTime<Local>> {
-        self.events
-            .iter()
-            .filter_map(|event| event.completed_at.or(event.created_at))
-            .max()
-    }
-
-    #[allow(dead_code)]
-    pub fn total_duration_ms(&self) -> i64 {
-        self.events.iter().filter_map(UsageEvent::duration_ms).sum()
+        self.start_time
     }
 }
 

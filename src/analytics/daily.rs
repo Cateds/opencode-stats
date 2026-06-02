@@ -13,7 +13,7 @@ pub struct DailyUsage {
 }
 
 pub fn aggregate_daily(
-    events: &[UsageEvent],
+    events: &[&UsageEvent],
     pricing: &PricingCatalog,
     today: NaiveDate,
     zero_cost_behavior: ZeroCostBehavior,
@@ -105,16 +105,17 @@ mod tests {
     #[test]
     fn daily_cost_estimates_when_zero_is_ignored() {
         let day = NaiveDate::from_ymd_opt(2026, 3, 12).unwrap();
+        let event = usage_event(
+            Some(Decimal::ZERO),
+            TokenUsage {
+                input: 1_000_000,
+                output: 1_000_000,
+                cache_read: 0,
+                cache_write: 0,
+            },
+        );
         let daily = aggregate_daily(
-            &[usage_event(
-                Some(Decimal::ZERO),
-                TokenUsage {
-                    input: 1_000_000,
-                    output: 1_000_000,
-                    cache_read: 0,
-                    cache_write: 0,
-                },
-            )],
+            &[&event],
             &pricing_catalog(),
             day,
             ZeroCostBehavior::EstimateWhenZero,
@@ -129,16 +130,17 @@ mod tests {
     #[test]
     fn daily_cost_keeps_zero_when_requested() {
         let day = NaiveDate::from_ymd_opt(2026, 3, 12).unwrap();
+        let event = usage_event(
+            Some(Decimal::ZERO),
+            TokenUsage {
+                input: 1_000_000,
+                output: 1_000_000,
+                cache_read: 0,
+                cache_write: 0,
+            },
+        );
         let daily = aggregate_daily(
-            &[usage_event(
-                Some(Decimal::ZERO),
-                TokenUsage {
-                    input: 1_000_000,
-                    output: 1_000_000,
-                    cache_read: 0,
-                    cache_write: 0,
-                },
-            )],
+            &[&event],
             &pricing_catalog(),
             day,
             ZeroCostBehavior::KeepZero,
@@ -153,8 +155,9 @@ mod tests {
     #[test]
     fn daily_cost_keeps_true_zero_for_zero_token_events() {
         let day = NaiveDate::from_ymd_opt(2026, 3, 12).unwrap();
+        let event = usage_event(Some(Decimal::ZERO), TokenUsage::default());
         let daily = aggregate_daily(
-            &[usage_event(Some(Decimal::ZERO), TokenUsage::default())],
+            &[&event],
             &pricing_catalog(),
             day,
             ZeroCostBehavior::EstimateWhenZero,

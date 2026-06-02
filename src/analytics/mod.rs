@@ -56,8 +56,8 @@ pub fn build_snapshot(
     let filtered_messages = filter_messages(&data.messages, range, today);
     let filtered_model_messages = filtered_messages
         .iter()
+        .copied()
         .filter(|message| message.model_id.is_some())
-        .cloned()
         .collect::<Vec<_>>();
     let daily = aggregate_daily(&filtered_events, pricing, today, zero_cost_behavior);
     let weekly = aggregate_weekly(&daily, 0);
@@ -144,7 +144,7 @@ fn saturating_sum(values: impl IntoIterator<Item = u64>) -> u64 {
         .fold(0u64, |total, value| total.saturating_add(value))
 }
 
-fn filter_events(events: &[UsageEvent], range: TimeRange, today: NaiveDate) -> Vec<UsageEvent> {
+fn filter_events(events: &[UsageEvent], range: TimeRange, today: NaiveDate) -> Vec<&UsageEvent> {
     events
         .iter()
         .filter(|event| {
@@ -152,7 +152,6 @@ fn filter_events(events: &[UsageEvent], range: TimeRange, today: NaiveDate) -> V
                 .activity_date()
                 .is_some_and(|date| crate::utils::time::in_range(date, range, today))
         })
-        .cloned()
         .collect()
 }
 
@@ -160,7 +159,7 @@ fn filter_messages(
     messages: &[MessageRecord],
     range: TimeRange,
     today: NaiveDate,
-) -> Vec<MessageRecord> {
+) -> Vec<&MessageRecord> {
     messages
         .iter()
         .filter(|message| {
@@ -168,14 +167,13 @@ fn filter_messages(
                 .activity_date()
                 .is_some_and(|date| crate::utils::time::in_range(date, range, today))
         })
-        .cloned()
         .collect()
 }
 
 fn filter_session_ids(
     data: &AppData,
-    filtered_events: &[UsageEvent],
-    filtered_messages: &[MessageRecord],
+    filtered_events: &[&UsageEvent],
+    filtered_messages: &[&MessageRecord],
     range: TimeRange,
     today: NaiveDate,
 ) -> BTreeSet<String> {

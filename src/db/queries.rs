@@ -83,7 +83,7 @@ pub fn load_from_sqlite(db_path: &Path) -> Result<AppData> {
 
     let session_lookup = sessions
         .iter()
-        .map(|session| (session.id.clone(), session.clone()))
+        .map(|session| (session.id.as_str(), session))
         .collect::<BTreeMap<_, _>>();
     let sqlite_messages = load_messages_sqlite(&conn, &session_lookup)?;
 
@@ -128,42 +128,48 @@ struct SqliteMessageLoad {
     skipped_messages: usize,
 }
 
-enum ParseMessagePayload {
-    Parsed(Box<Option<ParsedMessage>>),
-    InvalidJson,
-}
-
 fn load_messages_sqlite(
     conn: &rusqlite::Connection,
-    sessions: &BTreeMap<String, SessionRow>,
+    sessions: &BTreeMap<&str, &SessionRow>,
 ) -> Result<SqliteMessageLoad> {
     let mut stmt = conn
-        .prepare("SELECT session_id, data FROM message ORDER BY session_id ASC, time_created ASC")
+        .prepare(
+            "
+            SELECT session_id, data
+            FROM message
+            ORDER BY session_id ASC, time_created ASC
+            ",
+        )
         .map_err(Error::database_query)?;
 
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(Error::database_query)?;
     let mut messages = Vec::new();
     let mut skipped_messages = 0usize;
-    for row in rows {
-        let (session_id, payload) = row.map_err(Error::database_query)?;
-        let Some(session) = sessions.get(&session_id) else {
+    let mut rows = stmt.query([]).map_err(Error::database_query)?;
+    while let Some(row) = rows.next().map_err(Error::database_query)? {
+        let session_id: String = row.get("session_id").map_err(Error::database_query)?;
+        let Some(session) = sessions.get(session_id.as_str()) else {
             skipped_messages = skipped_messages.saturating_add(1);
             continue;
         };
 
-        match parse_message_payload(&payload, session, DataSourceKind::Sqlite)? {
-            ParseMessagePayload::Parsed(parsed) => {
-                if let Some(message) = *parsed {
-                    messages.push(message);
-                }
-            }
-            ParseMessagePayload::InvalidJson => {
+        let data = match row.get_ref("data").map_err(Error::database_query)? {
+            rusqlite::types::ValueRef::Text(bytes) => bytes,
+            _ => {
                 skipped_messages = skipped_messages.saturating_add(1);
+                continue;
             }
+        };
+
+        let record: JsonMessageRecord = match serde_json::from_slice(data) {
+            Ok(record) => record,
+            Err(_) => {
+                skipped_messages = skipped_messages.saturating_add(1);
+                continue;
+            }
+        };
+
+        if let Some(message) = parse_json_record(record, session, DataSourceKind::Sqlite) {
+            messages.push(message);
         }
     }
     Ok(SqliteMessageLoad {
@@ -288,21 +294,6 @@ fn load_from_json_values(values: Vec<serde_json::Value>, source_path: &Path) -> 
         import_stats,
         DataSourceKind::Json,
     )
-}
-
-fn parse_message_payload(
-    payload: &str,
-    session: &SessionRow,
-    source: DataSourceKind,
-) -> Result<ParseMessagePayload> {
-    let record: JsonMessageRecord = match serde_json::from_str(payload) {
-        Ok(record) => record,
-        Err(_) => return Ok(ParseMessagePayload::InvalidJson),
-    };
-
-    Ok(ParseMessagePayload::Parsed(Box::new(parse_json_record(
-        record, session, source,
-    ))))
 }
 
 fn parse_json_record(
@@ -433,7 +424,7 @@ fn finalize_app_data(
     let mut flattened = Vec::new();
     for (session_id, mut events) in grouped {
         events.sort_by_key(|event| event.created_at);
-        if let Some(summary) = SessionSummary::from_events(session_id, events.clone()) {
+        if let Some(summary) = SessionSummary::from_events(session_id, &events) {
             flattened.extend(events);
             sessions.push(summary);
         }

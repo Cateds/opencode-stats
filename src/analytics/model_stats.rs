@@ -57,8 +57,8 @@ pub struct ModelChartData {
 }
 
 pub fn build_model_chart(
-    events: &[UsageEvent],
-    messages: &[MessageRecord],
+    events: &[&UsageEvent],
+    messages: &[&MessageRecord],
     pricing: &PricingCatalog,
     range: TimeRange,
     today: NaiveDate,
@@ -67,6 +67,7 @@ pub fn build_model_chart(
     let mut model_rows = BTreeMap::<String, UsageAccumulator>::new();
 
     for message in messages {
+        let message = *message;
         let Some(model) = message.model_id.clone() else {
             continue;
         };
@@ -80,6 +81,7 @@ pub fn build_model_chart(
     }
 
     for event in events {
+        let event = *event;
         let model = event.model_id.clone();
         let entry = model_rows.entry(model).or_default();
         entry.tokens.add_assign(&event.tokens);
@@ -133,8 +135,8 @@ pub fn build_model_chart(
 }
 
 pub fn build_provider_chart(
-    events: &[UsageEvent],
-    messages: &[MessageRecord],
+    events: &[&UsageEvent],
+    messages: &[&MessageRecord],
     pricing: &PricingCatalog,
     range: TimeRange,
     today: NaiveDate,
@@ -157,6 +159,7 @@ pub fn build_provider_chart(
     }
 
     for event in events {
+        let event = *event;
         let provider = event
             .provider_id
             .clone()
@@ -235,7 +238,7 @@ pub fn chart_with_focus(chart: &ModelChartData, focused_model_id: Option<&str>) 
 }
 
 fn build_chart_for_models<F>(
-    events: &[UsageEvent],
+    events: &[&UsageEvent],
     top_models: &[String],
     range: TimeRange,
     today: NaiveDate,
@@ -460,30 +463,31 @@ mod tests {
             .with_ymd_and_hms(2026, 3, 12, 9, 30, 0)
             .single()
             .unwrap();
+        let event = UsageEvent {
+            session_id: "ses_1".to_string(),
+            parent_session_id: None,
+            session_title: None,
+            session_started_at: Some(created_at),
+            session_archived_at: None,
+            project_name: None,
+            project_path: None,
+            provider_id: Some("openai".to_string()),
+            model_id: "gpt-5".to_string(),
+            agent: None,
+            finish_reason: None,
+            tokens: TokenUsage {
+                input: 1,
+                output: 2,
+                cache_read: 0,
+                cache_write: 0,
+            },
+            created_at: Some(created_at),
+            completed_at: Some(created_at),
+            stored_cost_usd: None,
+            source: DataSourceKind::Json,
+        };
         let chart = build_chart_for_models(
-            &[UsageEvent {
-                session_id: "ses_1".to_string(),
-                parent_session_id: None,
-                session_title: None,
-                session_started_at: Some(created_at),
-                session_archived_at: None,
-                project_name: None,
-                project_path: None,
-                provider_id: Some("openai".to_string()),
-                model_id: "gpt-5".to_string(),
-                agent: None,
-                finish_reason: None,
-                tokens: TokenUsage {
-                    input: 1,
-                    output: 2,
-                    cache_read: 0,
-                    cache_write: 0,
-                },
-                created_at: Some(created_at),
-                completed_at: Some(created_at),
-                stored_cost_usd: None,
-                source: DataSourceKind::Json,
-            }],
+            &[&event],
             &["gpt-5".to_string()],
             TimeRange::All,
             day,
