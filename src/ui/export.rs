@@ -31,10 +31,6 @@ static FONT_REGULAR: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/assets/CascadiaCodeNF.ttf"
 ));
-static FONT_ITALIC: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/CascadiaCodeNFItalic.ttf"
-));
 
 pub fn render_share_card(buffer: &Buffer, theme: &Theme) -> Result<RgbaImage> {
     let fonts = Fonts::load()?;
@@ -112,7 +108,6 @@ pub fn render_share_card(buffer: &Buffer, theme: &Theme) -> Result<RgbaImage> {
 
 struct Fonts {
     regular: FontArc,
-    italic: FontArc,
 }
 
 impl Fonts {
@@ -120,8 +115,6 @@ impl Fonts {
         Ok(Self {
             regular: FontArc::try_from_slice(FONT_REGULAR)
                 .wrap_err("failed to load regular export font")?,
-            italic: FontArc::try_from_slice(FONT_ITALIC)
-                .wrap_err("failed to load italic export font")?,
         })
     }
 }
@@ -275,20 +268,15 @@ fn draw_buffer_text(
             }
 
             let cell_span = UnicodeWidthStr::width(symbol).max(1) as u32;
-            let font = if cell.modifier.contains(Modifier::ITALIC) {
-                &fonts.italic
-            } else {
-                &fonts.regular
-            };
             let fg = color_to_rgba(cell.fg, palette.default_foreground);
             let px = origin_x + u32::from(x) * metrics.cell_width;
             let py = origin_y + u32::from(y) * metrics.cell_height;
             let draw_x = px as i32 + metrics.glyph_x_offset;
             let draw_y = py as i32 + metrics.line_top_padding;
 
-            draw_text_mut(image, fg, draw_x, draw_y, metrics.scale, font, symbol);
+            draw_text_mut(image, fg, draw_x, draw_y, metrics.scale, &fonts.regular, symbol);
             if cell.modifier.contains(Modifier::BOLD) {
-                draw_text_mut(image, fg, draw_x + 1, draw_y, metrics.scale, font, symbol);
+                draw_text_mut(image, fg, draw_x + 1, draw_y, metrics.scale, &fonts.regular, symbol);
             }
 
             skip = cell_span.saturating_sub(1) as usize;
