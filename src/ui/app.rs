@@ -16,8 +16,8 @@ use crate::analytics::{AnalyticsSnapshot, build_snapshot};
 use crate::cache::models_cache::{PricingCatalog, refresh_remote_models};
 use crate::db::models::AppData;
 use crate::ui::export::render_share_card;
-use crate::ui::models::{SearchState, render_models, render_providers};
 use crate::ui::models::MAX_QUERY_LEN;
+use crate::ui::models::{SearchState, render_models, render_providers};
 use crate::ui::overview::render_overview;
 use crate::ui::theme::{Theme, ThemeKind};
 use crate::ui::widgets::common::{CONTENT_WIDTH, left_aligned_content, segment_span};
@@ -385,9 +385,7 @@ impl App {
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.copy_current_page();
             }
-            KeyCode::Char('f')
-                if matches!(self.page, Page::Models | Page::Providers) =>
-            {
+            KeyCode::Char('f') if matches!(self.page, Page::Models | Page::Providers) => {
                 self.enter_search();
             }
             KeyCode::Char(value) => {

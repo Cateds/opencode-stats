@@ -274,9 +274,25 @@ fn draw_buffer_text(
             let draw_x = px as i32 + metrics.glyph_x_offset;
             let draw_y = py as i32 + metrics.line_top_padding;
 
-            draw_text_mut(image, fg, draw_x, draw_y, metrics.scale, &fonts.regular, symbol);
+            draw_text_mut(
+                image,
+                fg,
+                draw_x,
+                draw_y,
+                metrics.scale,
+                &fonts.regular,
+                symbol,
+            );
             if cell.modifier.contains(Modifier::BOLD) {
-                draw_text_mut(image, fg, draw_x + 1, draw_y, metrics.scale, &fonts.regular, symbol);
+                draw_text_mut(
+                    image,
+                    fg,
+                    draw_x + 1,
+                    draw_y,
+                    metrics.scale,
+                    &fonts.regular,
+                    symbol,
+                );
             }
 
             skip = cell_span.saturating_sub(1) as usize;
