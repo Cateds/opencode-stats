@@ -233,8 +233,7 @@ mod tests {
             .single()
             .unwrap();
         let day = created_at.date_naive();
-        let events = vec![
-            UsageEvent {
+        let events = [UsageEvent {
                 session_id: "ses_1".to_string(),
                 parent_session_id: None,
                 session_title: None,
@@ -325,8 +324,7 @@ mod tests {
                 completed_at: Some(created_at),
                 stored_cost_usd: None,
                 source: DataSourceKind::Json,
-            },
-        ];
+            }];
 
         let pricing = crate::cache::models_cache::PricingCatalog {
             models: std::collections::BTreeMap::new(),
