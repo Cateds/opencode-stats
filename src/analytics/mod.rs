@@ -46,6 +46,7 @@ pub struct AnalyticsSnapshot {
     pub provider_chart: ModelChartData,
     pub agents: Vec<AgentUsageRow>,
     pub agent_chart: ModelChartData,
+    pub agent_model_charts: Vec<(String, ModelChartData)>,
     pub heatmap: HeatmapData,
 }
 
@@ -83,7 +84,7 @@ pub fn build_snapshot(
         zero_cost_behavior,
     );
     let heatmap = build_heatmap_data(&data.events, today);
-    let (agents, agent_chart) =
+    let (agents, agent_chart, agent_model_charts) =
         build_agent_chart(&filtered_events, pricing, range, today, zero_cost_behavior);
 
     let total_tokens = saturating_sum(filtered_events.iter().map(|event| event.tokens.total()));
@@ -142,6 +143,7 @@ pub fn build_snapshot(
         provider_chart,
         agents,
         agent_chart,
+        agent_model_charts,
         heatmap,
     }
 }

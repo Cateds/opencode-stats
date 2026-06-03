@@ -57,6 +57,13 @@ pub enum Page {
     Agents,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AgentChartMode {
+    #[default]
+    AllAgents,
+    PerModel,
+}
+
 impl Page {
     pub fn next(self) -> Self {
         match self {
@@ -90,6 +97,7 @@ pub struct App {
     pub focused_model_index: usize,
     pub focused_provider_index: usize,
     pub focused_agent_index: usize,
+    pub agent_chart_mode: AgentChartMode,
     pub search: Option<SearchState>,
     pricing_updates: mpsc::UnboundedReceiver<Result<PricingCatalog>>,
     clipboard_sender: mpsc::UnboundedSender<ClipboardUpdate>,
@@ -125,6 +133,7 @@ impl App {
             focused_model_index: 0,
             focused_provider_index: 0,
             focused_agent_index: 0,
+            agent_chart_mode: AgentChartMode::default(),
             search: None,
             pricing_updates: receiver,
             clipboard_sender,
@@ -276,6 +285,8 @@ impl App {
                 &self.snapshot,
                 self.range,
                 self.focused_agent_index,
+                self.agent_chart_mode,
+                self.focused_model_index,
                 self.search.as_ref(),
                 theme,
             ),
@@ -296,7 +307,10 @@ impl App {
             segment_span("7 Days", self.range == TimeRange::Last7Days, theme),
             segment_span("30 Days", self.range == TimeRange::Last30Days, theme),
             ratatui::text::Span::raw("    "),
-            ratatui::text::Span::styled(format!("{:?}", self.data.source), theme.muted_style()),
+            ratatui::text::Span::styled(
+                format!("{:?}", self.data.source),
+                theme.muted_style(),
+            ),
         ]);
 
         frame.render_widget(ratatui::widgets::Paragraph::new(line), content);
@@ -323,7 +337,10 @@ impl App {
                         match self.page {
                             Page::Models => self.focused_model_index = real_idx,
                             Page::Providers => self.focused_provider_index = real_idx,
-                            Page::Agents => self.focused_agent_index = real_idx,
+                            Page::Agents => {
+                                self.focused_agent_index = real_idx;
+                                self.focused_model_index = 0;
+                            }
                             _ => {}
                         }
                     }
@@ -408,6 +425,21 @@ impl App {
             {
                 self.enter_search();
             }
+            KeyCode::Char('n' | '0') if matches!(self.page, Page::Agents) => {
+                if self.agent_chart_mode == AgentChartMode::PerModel {
+                    self.focused_model_index = 0;
+                } else {
+                    self.focused_agent_index = 0;
+                    self.focused_model_index = 0;
+                }
+            }
+            KeyCode::Char('m') if matches!(self.page, Page::Agents) => {
+                self.agent_chart_mode = match self.agent_chart_mode {
+                    AgentChartMode::AllAgents => AgentChartMode::PerModel,
+                    AgentChartMode::PerModel => AgentChartMode::AllAgents,
+                };
+                self.focused_model_index = 0;
+            }
             KeyCode::Char(value) => {
                 if let Some(range) = TimeRange::from_shortcut(value) {
                     self.range = range;
@@ -449,10 +481,23 @@ impl App {
                     return;
                 }
 
-                let current = self.focused_agent_index as isize;
-                let total = self.snapshot.agents.len() as isize;
-                let next = (current + delta).rem_euclid(total) as usize;
-                self.focused_agent_index = next;
+                if self.agent_chart_mode == AgentChartMode::PerModel {
+                    let focused = self.focused_agent_index.min(self.snapshot.agents.len() - 1);
+                    let models = &self.snapshot.agents[focused].model_breakdown;
+                    if models.is_empty() {
+                        return;
+                    }
+                    let current = self.focused_model_index.min(models.len() - 1) as isize;
+                    let total = models.len() as isize;
+                    let next = (current + delta).rem_euclid(total) as usize;
+                    self.focused_model_index = next;
+                } else {
+                    let current = self.focused_agent_index as isize;
+                    let total = self.snapshot.agents.len() as isize;
+                    let next = (current + delta).rem_euclid(total) as usize;
+                    self.focused_agent_index = next;
+                    self.focused_model_index = 0;
+                }
             }
             Page::Overview => {}
         }
@@ -592,19 +637,19 @@ impl App {
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
-            Page::Agents => {
-                let mut lines = Vec::new();
-                for row in self.snapshot.agents.iter().take(8) {
-                    lines.push(format!(
+            Page::Agents => self
+                .snapshot
+                .agents
+                .iter()
+                .take(8)
+                .map(|row| {
+                    format!(
                         "{}: {} tokens ({:.2}%)",
                         row.agent_id, row.total_tokens, row.percentage
-                    ));
-                    for m in &row.model_breakdown {
-                        lines.push(format!("  {}: {} tokens", m.model_id, m.tokens));
-                    }
-                }
-                lines.join("\n")
-            }
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
         }
     }
 }

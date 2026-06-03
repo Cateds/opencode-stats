@@ -14,8 +14,13 @@ use super::model_stats::UsageAccumulator;
 pub struct AgentModelBreakdown {
     pub model_id: String,
     pub tokens: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_tokens: u64,
     pub cost: PriceSummary,
     pub sessions: usize,
+    pub active_days: usize,
+    pub p50_output_tokens_per_second: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -41,11 +46,13 @@ pub fn build_agent_chart(
     range: TimeRange,
     today: NaiveDate,
     zero_cost_behavior: ZeroCostBehavior,
-) -> (Vec<AgentUsageRow>, ModelChartData) {
+) -> (Vec<AgentUsageRow>, ModelChartData, Vec<(String, ModelChartData)>) {
     let mut agent_rows = BTreeMap::<String, UsageAccumulator>::new();
     let mut agent_model_tokens = BTreeMap::<String, BTreeMap<String, TokenUsage>>::new();
     let mut agent_model_cost = BTreeMap::<String, BTreeMap<String, PriceSummary>>::new();
     let mut agent_model_sessions = BTreeMap::<String, BTreeMap<String, BTreeSet<String>>>::new();
+    let mut agent_model_days = BTreeMap::<String, BTreeMap<String, BTreeSet<NaiveDate>>>::new();
+    let mut agent_model_rates = BTreeMap::<String, BTreeMap<String, Vec<f64>>>::new();
 
     for event in events {
         let agent = event
@@ -69,6 +76,12 @@ pub fn build_agent_chart(
         {
             let rate = event.tokens.output as f64 / (duration_ms as f64 / 1_000.0);
             entry.output_rates.push(rate);
+            agent_model_rates
+                .entry(agent.clone())
+                .or_default()
+                .entry(model.clone())
+                .or_default()
+                .push(rate);
         }
 
         let model_tokens = agent_model_tokens
@@ -91,6 +104,15 @@ pub fn build_agent_chart(
             .entry(model.clone())
             .or_default()
             .insert(event.session_id.clone());
+
+        if let Some(date) = event.activity_date() {
+            agent_model_days
+                .entry(agent.clone())
+                .or_default()
+                .entry(model.clone())
+                .or_default()
+                .insert(date);
+        }
     }
 
     let overall_tokens = agent_rows
@@ -108,6 +130,11 @@ pub fn build_agent_chart(
                         .map(|(model_id, tokens)| AgentModelBreakdown {
                             model_id: model_id.clone(),
                             tokens: tokens.total(),
+                            input_tokens: tokens.input,
+                            output_tokens: tokens.output,
+                            cache_tokens: tokens
+                                .cache_read
+                                .saturating_add(tokens.cache_write),
                             cost: agent_model_cost
                                 .get(&agent_id)
                                 .and_then(|costs| costs.get(model_id).cloned())
@@ -117,6 +144,16 @@ pub fn build_agent_chart(
                                 .and_then(|sessions| sessions.get(model_id))
                                 .map(|s| s.len())
                                 .unwrap_or(0),
+                            active_days: agent_model_days
+                                .get(&agent_id)
+                                .and_then(|days| days.get(model_id))
+                                .map(|d| d.len())
+                                .unwrap_or(0),
+                            p50_output_tokens_per_second: agent_model_rates
+                                .get(&agent_id)
+                                .and_then(|rates| rates.get(model_id))
+                                .map(|r| median(r))
+                                .unwrap_or(0.0),
                         })
                         .collect();
                     breakdown.sort_by_key(|b| std::cmp::Reverse(b.tokens));
@@ -153,7 +190,33 @@ pub fn build_agent_chart(
             .filter(|a| !a.is_empty())
             .unwrap_or_else(|| "unknown".to_string())
     });
-    (rows, chart)
+
+    let mut agent_model_charts = Vec::new();
+    for (agent_id, models) in &agent_model_tokens {
+        let model_ids: Vec<String> = models.keys().cloned().collect();
+        let agent_events: Vec<&UsageEvent> = events
+            .iter()
+            .filter(|event| {
+                event
+                    .agent
+                    .as_deref()
+                    .filter(|a| !a.is_empty())
+                    .unwrap_or("unknown")
+                    == agent_id.as_str()
+            })
+            .copied()
+            .collect();
+        let agent_chart = build_chart_for_models(
+            &agent_events,
+            &model_ids,
+            range,
+            today,
+            |event| event.model_id.clone(),
+        );
+        agent_model_charts.push((agent_id.clone(), agent_chart));
+    }
+
+    (rows, chart, agent_model_charts)
 }
 
 #[cfg(test)]
@@ -272,7 +335,7 @@ mod tests {
             availability: crate::cache::models_cache::PricingAvailability::Empty,
             load_notice: None,
         };
-        let (rows, _chart) = build_agent_chart(
+        let (rows, _chart, _agent_model_charts) = build_agent_chart(
             &events.iter().collect::<Vec<_>>(),
             &pricing,
             TimeRange::All,
@@ -285,21 +348,44 @@ mod tests {
         assert_eq!(rows[0].agent_id, "build");
         assert_eq!(rows[0].total_tokens, 1000);
         assert_eq!(rows[0].sessions, 2);
+        assert_eq!(rows[0].input_tokens, 400);
+        assert_eq!(rows[0].output_tokens, 600);
+        assert_eq!(rows[0].cache_tokens, 0);
+        assert_eq!(rows[0].active_days, 1);
+        assert!((rows[0].p50_output_tokens_per_second - 0.0).abs() < f64::EPSILON);
         assert_eq!(rows[0].model_breakdown.len(), 2);
         assert_eq!(rows[0].model_breakdown[0].model_id, "gpt-5.5");
         assert_eq!(rows[0].model_breakdown[0].tokens, 700);
+        assert_eq!(rows[0].model_breakdown[0].input_tokens, 300);
+        assert_eq!(rows[0].model_breakdown[0].output_tokens, 400);
+        assert_eq!(rows[0].model_breakdown[0].cache_tokens, 0);
         assert_eq!(rows[0].model_breakdown[0].sessions, 1);
+        assert_eq!(rows[0].model_breakdown[0].active_days, 1);
+        assert!((rows[0].model_breakdown[0].p50_output_tokens_per_second - 0.0).abs() < f64::EPSILON);
         assert_eq!(rows[0].model_breakdown[1].model_id, "gpt-5");
         assert_eq!(rows[0].model_breakdown[1].tokens, 300);
+        assert_eq!(rows[0].model_breakdown[1].input_tokens, 100);
+        assert_eq!(rows[0].model_breakdown[1].output_tokens, 200);
+        assert_eq!(rows[0].model_breakdown[1].cache_tokens, 0);
         assert_eq!(rows[0].model_breakdown[1].sessions, 1);
+        assert_eq!(rows[0].model_breakdown[1].active_days, 1);
 
         assert_eq!(rows[1].agent_id, "explore");
         assert_eq!(rows[1].total_tokens, 150);
         assert_eq!(rows[1].sessions, 1);
+        assert_eq!(rows[1].input_tokens, 50);
+        assert_eq!(rows[1].output_tokens, 100);
+        assert_eq!(rows[1].cache_tokens, 0);
+        assert_eq!(rows[1].active_days, 1);
+        assert!(rows[1].p50_output_tokens_per_second < f64::EPSILON);
         assert_eq!(rows[1].model_breakdown.len(), 1);
         assert_eq!(rows[1].model_breakdown[0].model_id, "claude-sonnet");
         assert_eq!(rows[1].model_breakdown[0].tokens, 150);
+        assert_eq!(rows[1].model_breakdown[0].input_tokens, 50);
+        assert_eq!(rows[1].model_breakdown[0].output_tokens, 100);
+        assert_eq!(rows[1].model_breakdown[0].cache_tokens, 0);
         assert_eq!(rows[1].model_breakdown[0].sessions, 1);
+        assert_eq!(rows[1].model_breakdown[0].active_days, 1);
 
         assert_eq!(rows[2].agent_id, "unknown");
         assert_eq!(rows[2].total_tokens, 30);
@@ -307,5 +393,9 @@ mod tests {
         assert_eq!(rows[2].model_breakdown[0].model_id, "unknown-model");
         assert_eq!(rows[2].model_breakdown[0].tokens, 30);
         assert_eq!(rows[2].model_breakdown[0].sessions, 1);
+        assert_eq!(rows[2].input_tokens, 10);
+        assert_eq!(rows[2].output_tokens, 20);
+        assert_eq!(rows[2].cache_tokens, 0);
+        assert_eq!(rows[2].active_days, 1);
     }
 }
