@@ -46,7 +46,11 @@ pub fn build_agent_chart(
     range: TimeRange,
     today: NaiveDate,
     zero_cost_behavior: ZeroCostBehavior,
-) -> (Vec<AgentUsageRow>, ModelChartData, Vec<(String, ModelChartData)>) {
+) -> (
+    Vec<AgentUsageRow>,
+    ModelChartData,
+    Vec<(String, ModelChartData)>,
+) {
     let mut agent_rows = BTreeMap::<String, UsageAccumulator>::new();
     let mut agent_model_tokens = BTreeMap::<String, BTreeMap<String, TokenUsage>>::new();
     let mut agent_model_cost = BTreeMap::<String, BTreeMap<String, PriceSummary>>::new();
@@ -132,9 +136,7 @@ pub fn build_agent_chart(
                             tokens: tokens.total(),
                             input_tokens: tokens.input,
                             output_tokens: tokens.output,
-                            cache_tokens: tokens
-                                .cache_read
-                                .saturating_add(tokens.cache_write),
+                            cache_tokens: tokens.cache_read.saturating_add(tokens.cache_write),
                             cost: agent_model_cost
                                 .get(&agent_id)
                                 .and_then(|costs| costs.get(model_id).cloned())
@@ -206,13 +208,10 @@ pub fn build_agent_chart(
             })
             .copied()
             .collect();
-        let agent_chart = build_chart_for_models(
-            &agent_events,
-            &model_ids,
-            range,
-            today,
-            |event| event.model_id.clone(),
-        );
+        let agent_chart =
+            build_chart_for_models(&agent_events, &model_ids, range, today, |event| {
+                event.model_id.clone()
+            });
         agent_model_charts.push((agent_id.clone(), agent_chart));
     }
 
@@ -233,7 +232,8 @@ mod tests {
             .single()
             .unwrap();
         let day = created_at.date_naive();
-        let events = [UsageEvent {
+        let events = [
+            UsageEvent {
                 session_id: "ses_1".to_string(),
                 parent_session_id: None,
                 session_title: None,
@@ -324,7 +324,8 @@ mod tests {
                 completed_at: Some(created_at),
                 stored_cost_usd: None,
                 source: DataSourceKind::Json,
-            }];
+            },
+        ];
 
         let pricing = crate::cache::models_cache::PricingCatalog {
             models: std::collections::BTreeMap::new(),
@@ -359,7 +360,9 @@ mod tests {
         assert_eq!(rows[0].model_breakdown[0].cache_tokens, 0);
         assert_eq!(rows[0].model_breakdown[0].sessions, 1);
         assert_eq!(rows[0].model_breakdown[0].active_days, 1);
-        assert!((rows[0].model_breakdown[0].p50_output_tokens_per_second - 0.0).abs() < f64::EPSILON);
+        assert!(
+            (rows[0].model_breakdown[0].p50_output_tokens_per_second - 0.0).abs() < f64::EPSILON
+        );
         assert_eq!(rows[0].model_breakdown[1].model_id, "gpt-5");
         assert_eq!(rows[0].model_breakdown[1].tokens, 300);
         assert_eq!(rows[0].model_breakdown[1].input_tokens, 100);

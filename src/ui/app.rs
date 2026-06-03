@@ -307,10 +307,7 @@ impl App {
             segment_span("7 Days", self.range == TimeRange::Last7Days, theme),
             segment_span("30 Days", self.range == TimeRange::Last30Days, theme),
             ratatui::text::Span::raw("    "),
-            ratatui::text::Span::styled(
-                format!("{:?}", self.data.source),
-                theme.muted_style(),
-            ),
+            ratatui::text::Span::styled(format!("{:?}", self.data.source), theme.muted_style()),
         ]);
 
         frame.render_widget(ratatui::widgets::Paragraph::new(line), content);

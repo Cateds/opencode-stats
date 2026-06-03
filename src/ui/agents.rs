@@ -51,8 +51,7 @@ pub fn render_agents(
         .or(Some(focused_agent_index));
 
     let focused_row = effective_focus.and_then(|i| snapshot.agents.get(i));
-    let focused_model = focused_row
-        .and_then(|row| row.model_breakdown.get(focused_model_index));
+    let focused_model = focused_row.and_then(|row| row.model_breakdown.get(focused_model_index));
 
     let chart_data = match chart_mode {
         AgentChartMode::AllAgents => chart_with_focus(
@@ -106,12 +105,7 @@ pub fn render_agents(
             AgentChartMode::PerModel => {
                 if let Some(model) = focused_model {
                     frame.render_widget(
-                        Paragraph::new(focus_model_line(
-                            model,
-                            focused_model_index,
-                            row,
-                            theme,
-                        )),
+                        Paragraph::new(focus_model_line(model, focused_model_index, row, theme)),
                         header_area,
                     );
                     frame.render_widget(Paragraph::new(""), spacer2);
@@ -152,10 +146,7 @@ fn mode_indicator(
         AgentChartMode::AllAgents => "  All agents".to_string(),
         AgentChartMode::PerModel => match focused_row {
             Some(agent) => {
-                format!(
-                    "  Models used by {}",
-                    truncate_label(&agent.agent_id, 40),
-                )
+                format!("  Models used by {}", truncate_label(&agent.agent_id, 40),)
             }
             None => "  Per-model (no data)".to_string(),
         },
@@ -325,11 +316,7 @@ fn render_model_detail(
         rows[1][0],
     );
     frame.render_widget(
-        Paragraph::new(metric_line(
-            "Sessions: ",
-            model.sessions.to_string(),
-            theme,
-        )),
+        Paragraph::new(metric_line("Sessions: ", model.sessions.to_string(), theme)),
         rows[1][1],
     );
     frame.render_widget(
