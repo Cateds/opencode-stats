@@ -237,7 +237,7 @@ pub fn chart_with_focus(chart: &ModelChartData, focused_model_id: Option<&str>) 
     }
 }
 
-fn build_chart_for_models<F>(
+pub fn build_chart_for_models<F>(
     events: &[&UsageEvent],
     top_models: &[String],
     range: TimeRange,
@@ -424,18 +424,18 @@ fn format_tick_label(value: f64) -> String {
 }
 
 #[derive(Default)]
-struct UsageAccumulator {
-    tokens: TokenUsage,
-    messages: usize,
-    prompts: usize,
-    sessions: BTreeSet<String>,
-    active_days: BTreeSet<NaiveDate>,
-    cost: PriceSummary,
-    daily_tokens: BTreeMap<NaiveDate, u64>,
-    output_rates: Vec<f64>,
+pub struct UsageAccumulator {
+    pub tokens: TokenUsage,
+    pub messages: usize,
+    pub prompts: usize,
+    pub sessions: BTreeSet<String>,
+    pub active_days: BTreeSet<NaiveDate>,
+    pub cost: PriceSummary,
+    pub daily_tokens: BTreeMap<NaiveDate, u64>,
+    pub output_rates: Vec<f64>,
 }
 
-fn median(values: &[f64]) -> f64 {
+pub fn median(values: &[f64]) -> f64 {
     if values.is_empty() {
         return 0.0;
     }

@@ -492,7 +492,7 @@ fn render_provider_detail(
     );
 }
 
-trait SearchItem {
+pub trait SearchItem {
     fn item_id(&self) -> &str;
     fn item_pct(&self) -> f64;
 }
@@ -515,7 +515,7 @@ impl SearchItem for ProviderUsageRow {
     }
 }
 
-fn render_search_overlay<T: SearchItem>(
+pub fn render_search_overlay<T: SearchItem>(
     frame: &mut ratatui::Frame<'_>,
     header_area: Rect,
     spacer_area: Rect,
@@ -646,7 +646,7 @@ fn render_search_overlay<T: SearchItem>(
     }
 }
 
-fn layout_rows<const ROW: usize, const COL: usize>(area: Rect) -> [[Rect; COL]; ROW] {
+pub fn layout_rows<const ROW: usize, const COL: usize>(area: Rect) -> [[Rect; COL]; ROW] {
     Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1); ROW])

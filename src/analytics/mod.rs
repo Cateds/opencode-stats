@@ -1,3 +1,4 @@
+pub mod agent_stats;
 pub mod daily;
 pub mod heatmap_data;
 pub mod model_stats;
@@ -8,6 +9,7 @@ use std::collections::BTreeSet;
 
 use chrono::NaiveDate;
 
+use crate::analytics::agent_stats::{AgentUsageRow, build_agent_chart};
 use crate::analytics::daily::aggregate_daily;
 use crate::analytics::heatmap_data::{HeatmapData, build_heatmap_data};
 use crate::analytics::model_stats::{
@@ -42,6 +44,9 @@ pub struct AnalyticsSnapshot {
     pub chart: ModelChartData,
     pub providers: Vec<ProviderUsageRow>,
     pub provider_chart: ModelChartData,
+    pub agents: Vec<AgentUsageRow>,
+    pub agent_chart: ModelChartData,
+    pub agent_model_charts: Vec<(String, ModelChartData)>,
     pub heatmap: HeatmapData,
 }
 
@@ -79,6 +84,8 @@ pub fn build_snapshot(
         zero_cost_behavior,
     );
     let heatmap = build_heatmap_data(&data.events, today);
+    let (agents, agent_chart, agent_model_charts) =
+        build_agent_chart(&filtered_events, pricing, range, today, zero_cost_behavior);
 
     let total_tokens = saturating_sum(filtered_events.iter().map(|event| event.tokens.total()));
     let input_tokens = saturating_sum(filtered_events.iter().map(|event| event.tokens.input));
@@ -134,6 +141,9 @@ pub fn build_snapshot(
         chart,
         providers,
         provider_chart,
+        agents,
+        agent_chart,
+        agent_model_charts,
         heatmap,
     }
 }
