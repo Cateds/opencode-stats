@@ -152,7 +152,7 @@ oc-stats cache clean
 
 Once the program is running, you can quickly navigate pages and time ranges using the keyboard:
 
-- `Tab` / `Left` / `Right` / `h` / `l` — Switch pages
+- `Tab` / `Shift+Tab` / `Left` / `Right` / `h` / `l` — Switch pages
 - `Up` / `Down` / `j` / `k` — Move focus within `Models` / `Providers` pages
 - `r` — Cycle through time ranges
 - `1` / `2` / `3` — Quickly switch time ranges

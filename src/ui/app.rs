@@ -291,7 +291,7 @@ impl App {
             .status_message
             .as_ref()
             .map(|status| status.text.as_str())
-            .unwrap_or("<tab> ←/→ h/l pages | r cycle | 1/2/3 pick | <ctrl-s> share | q exit");
+            .unwrap_or("<(shift-)tab> ←/→ h/l pages | r cycle | 1/2/3 pick | <ctrl-s> share | q exit");
         frame.render_widget(
             ratatui::widgets::Paragraph::new(status).style(theme.muted_style()),
             area,
@@ -366,7 +366,7 @@ impl App {
                 self.search = None;
                 self.page = self.page.next();
             }
-            KeyCode::Left | KeyCode::Char('h') => {
+            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
                 self.search = None;
                 self.page = self.page.previous();
             }
