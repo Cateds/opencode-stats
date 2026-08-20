@@ -152,7 +152,7 @@ oc-stats cache clean
 
 程序启动后可通过键盘快速切换页面和统计范围：
 
-- `Tab` / `Left` / `Right` / `h` / `l`：切换页面
+- `Tab` / `Shift+Tab` / `Left` / `Right` / `h` / `l`：切换页面
 - `Up` / `Down` / `j` / `k`：在 `Models` / `Providers` 页面中移动焦点
 - `r`：循环切换统计范围
 - `1` / `2` / `3`：快速切换时间范围
