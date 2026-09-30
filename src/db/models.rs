@@ -266,7 +266,7 @@ pub struct JsonMessageRecord {
 pub struct JsonModelRecord {
     #[serde(rename = "providerID")]
     pub provider_id: Option<String>,
-    #[serde(rename = "modelID")]
+    #[serde(rename = "modelID", alias = "id")]
     pub model_id: Option<String>,
 }
 

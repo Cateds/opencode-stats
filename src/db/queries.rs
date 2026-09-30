@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Local};
 
-use crate::db::connection::{self, discover_database_path, open_database};
+use crate::db::connection::{self, database_has_v2_tables, discover_database_path, open_database};
 use crate::db::errors::{Error, Result};
 use crate::db::models::{
     AppData, DataSourceKind, ImportStats, InputOptions, JsonMessageRecord, MessageRecord,
@@ -40,17 +40,22 @@ pub fn load_app_data(options: &InputOptions) -> Result<AppData> {
 pub fn load_from_sqlite(db_path: &Path) -> Result<AppData> {
     let conn = open_database(db_path)?;
 
-    let mut session_stmt = conn
-        .prepare(
-            "
+    let has_v2_tables = database_has_v2_tables(db_path)?;
+    let query = format!(
+        "
         SELECT s.id, s.parent_id, s.title, s.time_created, s.time_updated, s.time_archived,
                p.name as project_name, p.worktree as project_worktree
-        FROM session s
+        FROM {} s
         LEFT JOIN project p ON s.project_id = p.id
         ORDER BY s.time_created DESC
         ",
-        )
-        .map_err(Error::database_query)?;
+        if has_v2_tables {
+            "session_v2"
+        } else {
+            "session"
+        }
+    );
+    let mut session_stmt = conn.prepare(&query).map_err(Error::database_query)?;
 
     let sessions_iter = session_stmt
         .query_map([], |row| {
@@ -84,7 +89,7 @@ pub fn load_from_sqlite(db_path: &Path) -> Result<AppData> {
         .iter()
         .map(|session| (session.id.as_str(), session))
         .collect::<BTreeMap<_, _>>();
-    let sqlite_messages = load_messages_sqlite(&conn, &session_lookup)?;
+    let sqlite_messages = load_messages_sqlite(&conn, &has_v2_tables, &session_lookup)?;
 
     let mut all_events = Vec::new();
     let mut all_messages = Vec::new();
@@ -129,17 +134,24 @@ struct SqliteMessageLoad {
 
 fn load_messages_sqlite(
     conn: &rusqlite::Connection,
+    has_v2_tables: &bool,
     sessions: &BTreeMap<&str, &SessionRow>,
 ) -> Result<SqliteMessageLoad> {
-    let mut stmt = conn
-        .prepare(
-            "
-            SELECT session_id, data
-            FROM message
-            ORDER BY session_id ASC, time_created ASC
-            ",
-        )
-        .map_err(Error::database_query)?;
+    let query = if *has_v2_tables {
+        "
+        SELECT session_id, data, type AS role
+        FROM session_message
+        WHERE type IN ('user', 'assistant')
+        ORDER BY session_id ASC, time_created ASC
+        "
+    } else {
+        "
+        SELECT session_id, data, NULL AS role
+        FROM message
+        ORDER BY session_id ASC, time_created ASC
+        "
+    };
+    let mut stmt = conn.prepare(&query).map_err(Error::database_query)?;
 
     let mut messages = Vec::new();
     let mut skipped_messages = 0usize;
@@ -159,13 +171,19 @@ fn load_messages_sqlite(
             }
         };
 
-        let record: JsonMessageRecord = match serde_json::from_slice(data) {
+        let mut record: JsonMessageRecord = match serde_json::from_slice(data) {
             Ok(record) => record,
             Err(_) => {
                 skipped_messages = skipped_messages.saturating_add(1);
                 continue;
             }
         };
+
+        if record.role.is_none()
+            && let Some(role_column) = row.get("role").map_err(Error::database_query)?
+        {
+            record.role = Some(role_column);
+        }
 
         if let Some(message) = parse_json_record(record, session, DataSourceKind::Sqlite) {
             messages.push(message);

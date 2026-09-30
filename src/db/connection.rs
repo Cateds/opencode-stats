@@ -56,7 +56,9 @@ pub fn discover_database_path(custom_path: Option<&Path>) -> Option<PathBuf> {
     default_database_candidates(custom_path)
         .into_iter()
         .find(|candidate| {
-            candidate.exists() && database_has_expected_tables(candidate).unwrap_or(false)
+            candidate.exists()
+                && (database_has_v1_tables(candidate).unwrap_or(false)
+                    || database_has_v2_tables(candidate).unwrap_or(false))
         })
 }
 
@@ -65,11 +67,10 @@ pub fn open_database(path: &Path) -> Result<Connection> {
         .map_err(|e| Error::database_open(path, e))
 }
 
-pub fn database_has_expected_tables(path: &Path) -> Result<bool> {
-    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|e| Error::database_open(path, e))?;
+pub fn database_has_tables(path: &Path, check: Vec<&str>) -> Result<bool> {
+    let conn = open_database(path)?;
 
-    for table in ["session", "message", "project"] {
+    for table in &check {
         let exists = conn
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
@@ -85,6 +86,14 @@ pub fn database_has_expected_tables(path: &Path) -> Result<bool> {
     Ok(true)
 }
 
+pub fn database_has_v1_tables(path: &Path) -> Result<bool> {
+    database_has_tables(path, vec!["session", "message", "project"])
+}
+
+pub fn database_has_v2_tables(path: &Path) -> Result<bool> {
+    database_has_tables(path, vec!["session_v2", "session_message", "project"])
+}
+
 fn dedupe_preserve_order(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut seen = std::collections::HashSet::new();
     paths
@@ -95,7 +104,7 @@ fn dedupe_preserve_order(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{database_has_expected_tables, default_database_candidates};
+    use super::{database_has_v1_tables, default_database_candidates};
     use std::fs;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -121,7 +130,7 @@ mod tests {
             .unwrap();
         drop(conn);
 
-        assert!(!database_has_expected_tables(&db_path).unwrap());
+        assert!(!database_has_v1_tables(&db_path).unwrap());
         let _ = fs::remove_file(db_path);
     }
 }
